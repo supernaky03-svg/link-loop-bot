@@ -4,11 +4,39 @@ TEXTS: dict[str, str] = {
     'language_saved': 'Language saved.',
     'choose_language': 'Choose language:',
     'contact_admin': 'Contact admin: {admin_contact}',
-    'help': (
-        'Help\n\n'
-        'This bot creates channel link loops. Add the bot as admin in every channel with Post Messages permission, '
-        'then create a pair from the menu.\n\n'
-        'Movie Rule ON: when a video post appears, the bot loops the post immediately above that video if it was cached.'
+     'help': (
+        '❓ Help — How to use this bot\n\n'
+        'This bot helps you connect Telegram channels into one link loop.\n'
+        'Example: if Pair 1 has Channel A, B, and C, a new post from A can be sent to B, then from B to C with source links added under each post.\n\n'
+        '✅ First setup\n'
+        '1. Add this bot as Admin in every channel you want to use.\n'
+        '2. Give the bot Post Messages permission.\n'
+        '3. For public channels, you can send @username or https://t.me/username.\n'
+        '4. For private channels, send the -100... channel ID or a post link like https://t.me/c/1234567890/15.\n'
+        '5. Private invite links like https://t.me/+... cannot be checked by the bot.\n\n'
+        '➕ Add Pair\n'
+        'Use this to create a new channel group.\n'
+        'You will choose:\n'
+        '- Pair number, or Auto\n'
+        '- Repost Style\n'
+        '- Channel list\n'
+        '- Movie Rule ON/OFF\n\n'
+        '🔁 Repost Style\n'
+        'Random: the bot sends to the other channels in random order.\n'
+        'By Order: the bot follows the order numbers you set.\n\n'
+        '🎬 Movie Rule\n'
+        'OFF: every new post is looped.\n'
+        'ON: when a video appears, the bot does not loop the video itself. It loops the post immediately above that video if that post was already captured by the bot.\n\n'
+        '📋 My Pairs\n'
+        'Shows your saved pairs and their settings.\n\n'
+        '🗑 Remove Pair\n'
+        'Use this when you no longer want a pair to work. Removed/inactive pairs will not trigger admin warning reports.\n\n'
+        '⚠️ Common problems\n'
+        '- If the bot says admin permission is missing, check that it is Admin and can Post Messages.\n'
+        '- After fixing permissions, press 🔄 Recheck.\n'
+        '- Albums are sent as albums, with the footer on the first media item only.\n'
+        '- Do not add the same channel twice in one pair.\n\n'
+        '☎️ Need help? Use Contact Admin from the menu.'
     ),
     'generic_error': 'Something went wrong. Please try again or contact admin.',
     'something_went_wrong': 'Something went wrong. Please try again or contact admin.',
