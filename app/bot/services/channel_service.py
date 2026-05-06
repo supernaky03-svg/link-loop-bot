@@ -7,7 +7,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import ChatMemberAdministrator, ChatMemberOwner
 
-from app.bot.services.link_service import normalize_channel_input, public_channel_link
+from app.bot.services.link_service import is_private_invite_link, normalize_channel_input, public_channel_link
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,14 @@ class ChannelCheckResult:
 
 
 async def resolve_and_check_channel(bot: Bot, value: str, order_no: int | None = None) -> ChannelCheckResult:
+    if is_private_invite_link(value):
+        return ChannelCheckResult(
+            ok=False,
+            input_value=value,
+            order_no=order_no,
+            error='unsupported_private_invite',
+        )
+
     normalized = normalize_channel_input(value)
     try:
         chat = await bot.get_chat(normalized)

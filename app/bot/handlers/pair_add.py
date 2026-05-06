@@ -97,12 +97,12 @@ async def _validate_and_resolve_channels(
     language: str,
     raw: str,
     by_order: bool,
-) -> tuple[bool, str | None, list[dict]]:
+) -> tuple[bool, str | None, list[dict], bool]:
     settings = get_settings()
     _, channel_limit = await user_limits(repo, db_user, settings)
     parsed = parse_channel_list(raw, by_order)
     if len(parsed) < 2 or len(parsed) > channel_limit:
-        return False, t(language, 'channel_count_error', limit=channel_limit), []
+        return False, t(language, 'channel_count_error', limit=channel_limit), [], False
 
     checks: list[ChannelCheckResult] = []
     for order_no, value in parsed:
@@ -111,7 +111,14 @@ async def _validate_and_resolve_channels(
     resolved = [c for c in checks if c.chat_id is not None]
     ids = [c.chat_id for c in resolved]
     if len(ids) != len(set(ids)):
-        return False, t(language, 'duplicate_channels'), []
+        return False, t(language, 'duplicate_channels'), [], False
+
+    unsupported_invites = [c for c in checks if c.error == 'unsupported_private_invite']
+    if unsupported_invites:
+        lines = []
+        for err in unsupported_invites:
+            lines.append(t(language, 'unsupported_channel_input', value=err.input_value))
+        return False, '\n\n'.join(lines), [], False
 
     errors = [c for c in checks if not c.ok]
     if errors:
@@ -123,7 +130,7 @@ async def _validate_and_resolve_channels(
                 lines.append(f'{idx}. {err.input_value}')
         lines.append('')
         lines.append(t(language, 'missing_admin_footer'))
-        return False, '\n'.join(lines), []
+        return False, '\n'.join(lines), [], True
 
     channels = [
         {
@@ -135,7 +142,7 @@ async def _validate_and_resolve_channels(
         }
         for idx, c in enumerate(checks, start=1)
     ]
-    return True, None, channels
+    return True, None, channels, False
 
 
 @router.message(F.text.in_(_add_buttons()))
@@ -189,13 +196,19 @@ async def add_channels(message: Message, state: FSMContext, repo: Repository, db
     raw = (message.text or '').strip()
     data = await state.get_data()
     style = data.get('repost_style', 'random')
-    ok, error_text, channels = await _validate_and_resolve_channels(
+    ok, error_text, channels, can_recheck = await _validate_and_resolve_channels(
         message.bot, repo, db_user, language, raw, by_order=style == 'by_order'
     )
     await state.update_data(raw_channels=raw)
     if not ok:
         await state.set_state(AddPairStates.admin_missing)
-        await update_flow_message(message.bot, state, message.chat.id, error_text or t(language, 'generic_error'), recheck_keyboard(language, 'add'))
+        await update_flow_message(
+            message.bot,
+            state,
+            message.chat.id,
+            error_text or t(language, 'generic_error'),
+            recheck_keyboard(language, 'add') if can_recheck else flow_nav_keyboard(language),
+        )
         return
     await state.update_data(channels=channels)
     await _show_movie(message, state, language)
@@ -207,11 +220,17 @@ async def add_recheck(callback: CallbackQuery, state: FSMContext, repo: Reposito
     data = await state.get_data()
     raw = data.get('raw_channels', '')
     style = data.get('repost_style', 'random')
-    ok, error_text, channels = await _validate_and_resolve_channels(
+    ok, error_text, channels, can_recheck = await _validate_and_resolve_channels(
         callback.bot, repo, db_user, language, raw, by_order=style == 'by_order'
     )
     if not ok:
-        await update_flow_message(callback.bot, state, callback.message.chat.id, error_text or t(language, 'generic_error'), recheck_keyboard(language, 'add'))
+        await update_flow_message(
+            callback.bot,
+            state,
+            callback.message.chat.id,
+            error_text or t(language, 'generic_error'),
+            recheck_keyboard(language, 'add') if can_recheck else flow_nav_keyboard(language),
+        )
         return
     await state.update_data(channels=channels)
     await _show_movie(callback, state, language)

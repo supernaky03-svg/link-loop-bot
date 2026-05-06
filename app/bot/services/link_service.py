@@ -6,6 +6,17 @@ from app.db.models import PairChannel
 
 _USERNAME_RE = re.compile(r'^(?:https?://)?t\.me/([A-Za-z0-9_]{5,})(?:/\d+)?/?$')
 _PRIVATE_C_RE = re.compile(r'^(?:https?://)?t\.me/c/(\d+)(?:/\d+)?/?$')
+_INVITE_LINK_RE = re.compile(r'^(?:https?://)?t\.me/(?:\+|joinchat/)[A-Za-z0-9_-]+/?$')
+
+
+def is_private_invite_link(value: str) -> bool:
+    """Return True for t.me/+hash or t.me/joinchat/hash links.
+
+    Telegram Bot API methods like getChat/getChatMember cannot resolve a
+    private invite hash as chat_id. The bot must be given @username, numeric
+    -100... chat ID, or a t.me/c/... link copied from an existing post.
+    """
+    return bool(_INVITE_LINK_RE.match(value.strip()))
 
 
 def normalize_channel_input(value: str) -> str:

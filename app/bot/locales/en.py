@@ -48,8 +48,13 @@ TEXTS: dict[str, str] = {
     'channel_count_error': 'Channel count must be between 2 and {limit}.',
     'duplicate_channels': 'Duplicate channels are not allowed.',
     'unsupported_channel_input': (
-        'Cannot resolve this channel: {value}\n\n'
-        'For private channels, add the bot as admin first and send the numeric -100... chat ID.'
+        'This private invite link cannot be checked by Bot API:\n{value}\n\n'
+        'The bot may already be admin, but invite links like https://t.me/+... are not valid chat IDs for getChat/getChatMember.\n\n'
+        'Please send one of these instead:\n'
+        '1. Public @username or https://t.me/username\n'
+        '2. Numeric private channel ID like -1001234567890\n'
+        '3. Private post link like https://t.me/c/1234567890/15\n\n'
+        'Tip: copy a message/post link from that private channel, or use @raw_data_bot to get the -100... ID.'
     ),
     'missing_admin_title': 'These channels are missing admin permission:',
     'admin_missing': 'Admin permission is missing.',

@@ -48,8 +48,13 @@ TEXTS: dict[str, str] = {
     'channel_count_error': 'Channel အရေအတွက်သည် 2 မှ {limit} အတွင်း ဖြစ်ရမည်။',
     'duplicate_channels': 'Channel တစ်ခုကို ထပ်ထည့်လို့မရပါ။',
     'unsupported_channel_input': (
-        'ဒီ channel ကို မစစ်နိုင်ပါ: {value}\n\n'
-        'Private channel ဖြစ်လျှင် bot ကို admin အရင်ပေးပြီး -100... chat ID ကို ပို့ပါ။'
+        'ဒီ private invite link ကို Bot API နဲ့ စစ်လို့မရပါ:\n{value}\n\n'
+        'Bot ကို admin ပေးထားပြီးသားဖြစ်နိုင်ပေမဲ့ https://t.me/+... invite link က getChat/getChatMember အတွက် chat ID မဟုတ်ပါ။\n\n'
+        'အောက်ပါတစ်ခုခုကို ပြန်ပို့ပါ:\n'
+        '1. Public @username သို့မဟုတ် https://t.me/username\n'
+        '2. Private channel numeric ID ဥပမာ -1001234567890\n'
+        '3. Private post link ဥပမာ https://t.me/c/1234567890/15\n\n'
+        'Tip: private channel ထဲက post တစ်ခုကို Copy Link လုပ်ပါ သို့မဟုတ် @raw_data_bot ဖြင့် -100... ID ယူပါ။'
     ),
     'missing_admin_title': 'အောက်ပါ channel များတွင် admin permission မပြည့်စုံပါ:',
     'admin_missing': '⚠️ Admin permission မပြည့်စုံပါ။',
