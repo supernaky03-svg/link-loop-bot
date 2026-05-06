@@ -1,0 +1,15 @@
+Fixed files/groups:
+- app/config.py: rewritten in proper Python format with validated env parsing.
+- app/main.py: rewritten in proper Python format; fixed broken logger string newline.
+- app/db/*.py: normalized LF newlines and indentation; compile checked.
+- app/bot/handlers/*.py: normalized LF newlines and indentation; compile checked.
+- app/bot/services/*.py: normalized LF newlines and indentation; compile checked.
+- app/bot/services/movie_rule_service.py: verified and restored functions: message_media_info, _unit_key, save_messages_as_post_unit, select_unit_for_pair.
+- requirements.txt: one package per line.
+- render.yaml: valid YAML for Render web service.
+- .env.example: one env var per line.
+- app/bot/locales/my.py: Myanmar main_menu + Recheck/Back/Cancel/Confirm/Auto/ON/OFF/Random/By Order emoji button text fixed.
+
+Validation run:
+python -m compileall -q app tests
+Result: OK
