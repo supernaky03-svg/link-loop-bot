@@ -7,6 +7,7 @@ class AddPairStates(StatesGroup):
     waiting_pair_no = State()
     waiting_style = State()
     waiting_channels = State()
+    waiting_channel_missing = State()
     waiting_movie_rule = State()
     admin_missing = State()
     confirmation = State()

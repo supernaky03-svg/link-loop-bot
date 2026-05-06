@@ -79,6 +79,7 @@ class PairChannel(Base, TimestampMixin):
     username: Mapped[str | None] = mapped_column(String(255))
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     channel_link: Mapped[str | None] = mapped_column(Text)
+    invite_link: Mapped[str | None] = mapped_column(Text)
     order_no: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     bot_admin_ok: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

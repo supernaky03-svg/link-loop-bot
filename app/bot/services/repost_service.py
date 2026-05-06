@@ -15,7 +15,7 @@ from aiogram.types import (
 )
 
 from app.bot.services.language_service import t
-from app.bot.services.link_service import channel_link_from_pair_channel, post_link
+from app.bot.services.link_service import channel_link_from_pair_channel, post_link, strip_visible_links
 from app.bot.services.pair_service import build_route
 from app.db.models import LoopEvent, Pair, PairChannel, PostItem, PostUnit
 from app.db.repository import Repository
@@ -27,7 +27,7 @@ CAPTION_LIMIT = 1024
 
 
 def _join_with_footer(body: str | None, footer: str, limit: int) -> str:
-    body = (body or '').strip()
+    body = (strip_visible_links(body) or '').strip()
     text = f'{body}\n\n{footer}' if body else footer
     if len(text) <= limit:
         return text
@@ -82,7 +82,8 @@ async def send_post_unit(bot: Bot, unit: PostUnit, to_chat_id: int, footer: str)
                         caption = _join_with_footer(item.caption or unit.caption or unit.text, footer, CAPTION_LIMIT)
                         footer_used = True
                     elif item.caption:
-                        caption = item.caption[:CAPTION_LIMIT]
+                        cleaned_caption = strip_visible_links(item.caption)
+                        caption = cleaned_caption[:CAPTION_LIMIT] if cleaned_caption else None
                     input_media = _item_to_input_media(item, caption)
                     if input_media:
                         media.append(input_media)

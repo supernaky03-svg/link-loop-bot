@@ -4,7 +4,7 @@ TEXTS: dict[str, str] = {
     'language_saved': 'Language saved.',
     'choose_language': 'Choose language:',
     'contact_admin': 'Contact admin: {admin_contact}',
-     'help': (
+    'help': (
         '❓ Help — How to use this bot\n\n'
         'This bot helps you connect Telegram channels into one link loop.\n'
         'Example: if Pair 1 has Channel A, B, and C, a new post from A can be sent to B, then from B to C with source links added under each post.\n\n'
@@ -12,8 +12,9 @@ TEXTS: dict[str, str] = {
         '1. Add this bot as Admin in every channel you want to use.\n'
         '2. Give the bot Post Messages permission.\n'
         '3. For public channels, you can send @username or https://t.me/username.\n'
-        '4. For private channels, send the -100... channel ID or a post link like https://t.me/c/1234567890/15.\n'
-        '5. Private invite links like https://t.me/+... cannot be checked by the bot.\n\n'
+        '4. For private channels, send both invite link + -100... channel ID.\n'
+        '   Example: https://t.me/+invite1(-1001234567890)\n'
+        '5. If you send only an invite link or only a channel ID, the bot will ask for the missing ID/link.\n\n'
         '➕ Add Pair\n'
         'Use this to create a new channel group.\n'
         'You will choose:\n'
@@ -66,12 +67,43 @@ TEXTS: dict[str, str] = {
     'add_pair_step_style': 'Step 2/5: Choose repost style.',
     'add_pair_step_channels_random': (
         'Step 3/5: Send channel links or IDs separated by comma.\n\n'
-        'Example:\nhttps://t.me/channelA, https://t.me/channelB, -1001234567890'
+        'Public channel:\nhttps://t.me/channelB\n\n'
+        'Private channel must include invite link + channel ID:\n'
+        'https://t.me/+invite1(-1001234567890)\n'
+        '-1001234568798(https://t.me/+invite2)\n'
+        'https://t.me/+invite3 = -1001234567777\n\n'
+        'Example:\nhttps://t.me/+invite1(-1001234567890), https://t.me/channelB, -1001234568798(https://t.me/+invite2)'
     ),
     'add_pair_step_channels_order': (
         'Step 3/5: Send channel links or IDs with order numbers.\n\n'
-        'Example:\n1-https://t.me/channelA, 2-https://t.me/channelB, 3--1001234567890\n\n'
+        'Public channel:\n1-https://t.me/channelB\n\n'
+        'Private channel must include invite link + channel ID:\n'
+        '2-https://t.me/+invite1(-1001234567890)\n'
+        '3--1001234568798(https://t.me/+invite2)\n'
+        '4-https://t.me/+invite3 = -1001234567777\n\n'
         'If numbers are missing, the given order will be used.'
+    ),
+    'invalid_channel_input_title': 'These channel inputs are invalid:',
+    'channel_input_format_help': (
+        'Send public channels as https://t.me/channelName.\n'
+        'Send private channels as invite link + channel ID, for example:\n'
+        'https://t.me/+invite1(-1001234567890)\n'
+        '-1001234567890(https://t.me/+invite1)\n'
+        'https://t.me/+invite1 = -1001234567890'
+    ),
+    'missing_chat_id_title': 'Please send the channel ID for these invite links:',
+    'missing_chat_id_example': (
+        'Example:\n'
+        'https://t.me/+invite1(-1001234567890)\n'
+        'or\n'
+        'https://t.me/+invite1 = -1001234567890'
+    ),
+    'missing_invite_link_title': 'Please send the invite link for these channel IDs:',
+    'missing_invite_link_example': (
+        'Example:\n'
+        '-1001234567890(https://t.me/+invite1)\n'
+        'or\n'
+        '-1001234567890 = https://t.me/+invite1'
     ),
     'channel_count_error': 'Channel count must be between 2 and {limit}.',
     'duplicate_channels': 'Duplicate channels are not allowed.',
@@ -117,7 +149,7 @@ TEXTS: dict[str, str] = {
     'status_report_sent': 'Status report sent to report group.',
     'status_report_failed': 'Could not send status report to report group. Please check logs.',
     'usage_error': 'Invalid command usage.',
-    'footer': 'Source Channel: {channel_title}\nChannel Link: {channel_link}\nPost Link: {post_link}',
+    'footer': 'Join the channel first - {channel_link}\n\nTap to view - {post_link}',
     'permission_removed_user': (
         '⚠️ Bot admin permission was removed from {channel_title}.\n'
         'Pairs using this channel have been paused.\n'

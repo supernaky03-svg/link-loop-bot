@@ -12,8 +12,9 @@ TEXTS: dict[str, str] = {
         '1. အသုံးပြုမယ့် channel တိုင်းမှာ ဒီ Bot ကို Admin ပေးပါ။\n'
         '2. Post Messages permission ကို ဖွင့်ပေးပါ။\n'
         '3. Public channel ဆိုရင် @username သို့မဟုတ် https://t.me/username ပို့လို့ရပါတယ်။\n'
-        '4. Private channel ဆိုရင် -100... channel ID သို့မဟုတ် https://t.me/c/1234567890/15 လို post link ပို့ပါ။\n'
-        '5. https://t.me/+... private invite link ကို Bot ကစစ်လို့မရပါ။\n\n'
+        '4. Private channel ဆိုရင် invite link + -100... channel ID နှစ်ခုစလုံးပို့ပါ။\n'
+        '   ဥပမာ: https://t.me/+invite1(-1001234567890)\n'
+        '5. invite link တစ်ခုတည်း သို့မဟုတ် channel ID တစ်ခုတည်းပို့ရင် Bot က လိုတဲ့ ID/link ကို ထပ်တောင်းပါမယ်။\n\n'
         '➕ Pair ထည့်မယ်\n'
         'Channel group အသစ်တစ်ခုထည့်ဖို့သုံးပါ။\n'
         'ထည့်တဲ့အခါ ဒီအဆင့်တွေ ရွေးရပါမယ်။\n'
@@ -66,12 +67,43 @@ TEXTS: dict[str, str] = {
     'add_pair_step_style': 'အဆင့် 2/5: Repost style ရွေးပါ။',
     'add_pair_step_channels_random': (
         'အဆင့် 3/5: Channel link သို့မဟုတ် ID များကို comma ဖြင့်ခွဲပြီး ပို့ပါ။\n\n'
-        'ဥပမာ:\nhttps://t.me/channelA, https://t.me/channelB, -1001234567890'
+        'Public channel:\nhttps://t.me/channelB\n\n'
+        'Private channel ဆိုရင် invite link + channel ID နှစ်ခုစလုံးထည့်ပါ:\n'
+        'https://t.me/+invite1(-1001234567890)\n'
+        '-1001234568798(https://t.me/+invite2)\n'
+        'https://t.me/+invite3 = -1001234567777\n\n'
+        'ဥပမာ:\nhttps://t.me/+invite1(-1001234567890), https://t.me/channelB, -1001234568798(https://t.me/+invite2)'
     ),
     'add_pair_step_channels_order': (
         'အဆင့် 3/5: Channel link သို့မဟုတ် ID များကို order number ဖြင့် ပို့ပါ။\n\n'
-        'ဥပမာ:\n1-https://t.me/channelA, 2-https://t.me/channelB, 3--1001234567890\n\n'
+        'Public channel:\n1-https://t.me/channelB\n\n'
+        'Private channel ဆိုရင် invite link + channel ID နှစ်ခုစလုံးထည့်ပါ:\n'
+        '2-https://t.me/+invite1(-1001234567890)\n'
+        '3--1001234568798(https://t.me/+invite2)\n'
+        '4-https://t.me/+invite3 = -1001234567777\n\n'
         'Number မပါလျှင် ပို့ထားသောအစဉ်အတိုင်း သတ်မှတ်မည်။'
+    ),
+    'invalid_channel_input_title': 'အောက်ပါ channel input များ မမှန်ပါ:',
+    'channel_input_format_help': (
+        'Public channel ကို https://t.me/channelName ပုံစံပို့ပါ။\n'
+        'Private channel ကို invite link + channel ID နှစ်ခုစလုံးနဲ့ ပို့ပါ။ ဥပမာ:\n'
+        'https://t.me/+invite1(-1001234567890)\n'
+        '-1001234567890(https://t.me/+invite1)\n'
+        'https://t.me/+invite1 = -1001234567890'
+    ),
+    'missing_chat_id_title': 'အောက်ပါ invite link များ၏ channel ID ကို ပို့ပါ:',
+    'missing_chat_id_example': (
+        'ဥပမာ:\n'
+        'https://t.me/+invite1(-1001234567890)\n'
+        'သို့မဟုတ်\n'
+        'https://t.me/+invite1 = -1001234567890'
+    ),
+    'missing_invite_link_title': 'အောက်ပါ channel ID များ၏ invite link ကို ပို့ပါ:',
+    'missing_invite_link_example': (
+        'ဥပမာ:\n'
+        '-1001234567890(https://t.me/+invite1)\n'
+        'သို့မဟုတ်\n'
+        '-1001234567890 = https://t.me/+invite1'
     ),
     'channel_count_error': 'Channel အရေအတွက်သည် 2 မှ {limit} အတွင်း ဖြစ်ရမည်။',
     'duplicate_channels': 'Channel တစ်ခုကို ထပ်ထည့်လို့မရပါ။',
@@ -117,7 +149,7 @@ TEXTS: dict[str, str] = {
     'status_report_sent': 'Status report ကို report group သို့ ပို့ပြီးပါပြီ။',
     'status_report_failed': 'Status report ကို report group သို့ မပို့နိုင်ပါ။ Log ကိုစစ်ပါ။',
     'usage_error': 'Command အသုံးပြုပုံ မမှန်ပါ။',
-    'footer': 'မူရင်း Channel: {channel_title}\nChannel Link: {channel_link}\nPost Link: {post_link}',
+    'footer': 'Channel အရင် join ပါ - {channel_link}\n\nကြည့်ရန်နှိပ်ပါ - {post_link}',
     'permission_removed_user': (
         '⚠️ {channel_title} တွင် Bot admin permission ဖြုတ်ထားသည်။\n'
         'ဤ channel ပါသော Pair များကို ယာယီရပ်ထားပါသည်။\n'

@@ -15,9 +15,16 @@ from app.bot.keyboards.inline import (
     style_keyboard,
 )
 from app.bot.keyboards.reply import main_menu
-from app.bot.services.channel_service import ChannelCheckResult, parse_channel_list, resolve_and_check_channel
+from app.bot.services.channel_service import (
+    ChannelCheckResult,
+    ChannelValidationResult,
+    merge_missing_channel_info,
+    parse_channel_list,
+    resolve_and_check_channel,
+)
 from app.bot.services.flow_message import update_flow_message
 from app.bot.services.language_service import b, t
+from app.bot.services.link_service import ParsedChannelInput
 from app.bot.services.pair_service import user_limits
 from app.bot.states.pair_states import AddPairStates
 from app.config import get_settings
@@ -32,16 +39,26 @@ def _add_buttons() -> set[str]:
     return {b('en', 'add_pair'), b('my', 'add_pair')}
 
 
+def _message_chat_id(message_or_callback: Message | CallbackQuery) -> int:
+    if isinstance(message_or_callback, CallbackQuery):
+        return message_or_callback.message.chat.id
+    return message_or_callback.chat.id
+
+
+def _message_bot(message_or_callback: Message | CallbackQuery):
+    return message_or_callback.bot
+
+
 async def _show_pair_no(message_or_callback, state: FSMContext, language: str) -> None:
-    chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
-    bot = message_or_callback.bot
+    chat_id = _message_chat_id(message_or_callback)
+    bot = _message_bot(message_or_callback)
     await state.set_state(AddPairStates.waiting_pair_no)
     await update_flow_message(bot, state, chat_id, t(language, 'add_pair_step_pair_no'), pair_no_keyboard(language))
 
 
 async def _show_style(message_or_callback, state: FSMContext, language: str) -> None:
-    chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
-    bot = message_or_callback.bot
+    chat_id = _message_chat_id(message_or_callback)
+    bot = _message_bot(message_or_callback)
     await state.set_state(AddPairStates.waiting_style)
     await update_flow_message(bot, state, chat_id, t(language, 'add_pair_step_style'), style_keyboard(language, 'add'))
 
@@ -50,15 +67,24 @@ async def _show_channels(message_or_callback, state: FSMContext, language: str) 
     data = await state.get_data()
     style = data.get('repost_style', 'random')
     key = 'add_pair_step_channels_order' if style == 'by_order' else 'add_pair_step_channels_random'
-    chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
-    bot = message_or_callback.bot
+    chat_id = _message_chat_id(message_or_callback)
+    bot = _message_bot(message_or_callback)
     await state.set_state(AddPairStates.waiting_channels)
     await update_flow_message(bot, state, chat_id, t(language, key), flow_nav_keyboard(language))
 
 
+async def _show_missing_channel_info(message_or_callback, state: FSMContext, language: str) -> None:
+    data = await state.get_data()
+    inputs = _load_channel_inputs(data)
+    chat_id = _message_chat_id(message_or_callback)
+    bot = _message_bot(message_or_callback)
+    await state.set_state(AddPairStates.waiting_channel_missing)
+    await update_flow_message(bot, state, chat_id, _missing_channel_info_text(language, inputs), flow_nav_keyboard(language))
+
+
 async def _show_movie(message_or_callback, state: FSMContext, language: str) -> None:
-    chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
-    bot = message_or_callback.bot
+    chat_id = _message_chat_id(message_or_callback)
+    bot = _message_bot(message_or_callback)
     await state.set_state(AddPairStates.waiting_movie_rule)
     await update_flow_message(bot, state, chat_id, t(language, 'add_pair_step_movie'), on_off_keyboard(language, 'add:movie'))
 
@@ -67,7 +93,8 @@ async def _show_confirm(message_or_callback, state: FSMContext, language: str) -
     data = await state.get_data()
     channels = data.get('channels', [])
     channel_lines = '\n'.join(
-        f"{ch['order_no']}. {ch['title']} ({ch['chat_id']})" for ch in sorted(channels, key=lambda x: x['order_no'])
+        _format_channel_confirm_line(ch)
+        for ch in sorted(channels, key=lambda x: x['order_no'])
     )
     text = t(
         language,
@@ -77,10 +104,16 @@ async def _show_confirm(message_or_callback, state: FSMContext, language: str) -
         movie_rule=t(language, 'on' if data.get('movie_rule') else 'off'),
         channels=channel_lines,
     )
-    chat_id = message_or_callback.message.chat.id if isinstance(message_or_callback, CallbackQuery) else message_or_callback.chat.id
-    bot = message_or_callback.bot
+    chat_id = _message_chat_id(message_or_callback)
+    bot = _message_bot(message_or_callback)
     await state.set_state(AddPairStates.confirmation)
     await update_flow_message(bot, state, chat_id, text, confirm_keyboard(language, 'add'))
+
+
+def _format_channel_confirm_line(ch: dict) -> str:
+    invite = ch.get('invite_link')
+    suffix = f' | invite: {invite}' if invite else ''
+    return f"{ch['order_no']}. {ch['title']} ({ch['chat_id']}){suffix}"
 
 
 async def _check_pair_limit(repo: Repository, db_user: User) -> tuple[bool, int]:
@@ -90,35 +123,79 @@ async def _check_pair_limit(repo: Repository, db_user: User) -> tuple[bool, int]
     return current < pair_limit, pair_limit
 
 
-async def _validate_and_resolve_channels(
+def _serialize_channel_inputs(inputs: list[ParsedChannelInput]) -> list[dict]:
+    return [item.to_dict() for item in inputs]
+
+
+def _load_channel_inputs(data: dict) -> list[ParsedChannelInput]:
+    return [ParsedChannelInput.from_dict(item) for item in data.get('channel_inputs', [])]
+
+
+def _missing_channel_info_text(language: str, inputs: list[ParsedChannelInput]) -> str:
+    missing_id = [item for item in inputs if item.missing == 'chat_id']
+    missing_invite = [item for item in inputs if item.missing == 'invite_link']
+    parts: list[str] = []
+    if missing_id:
+        lines = [t(language, 'missing_chat_id_title')]
+        for idx, item in enumerate(missing_id, start=1):
+            lines.append(f'{idx}. {item.invite_link or item.raw}')
+        lines.append('')
+        lines.append(t(language, 'missing_chat_id_example'))
+        parts.append('\n'.join(lines))
+    if missing_invite:
+        lines = [t(language, 'missing_invite_link_title')]
+        for idx, item in enumerate(missing_invite, start=1):
+            lines.append(f'{idx}. {item.chat_id or item.raw}')
+        lines.append('')
+        lines.append(t(language, 'missing_invite_link_example'))
+        parts.append('\n'.join(lines))
+    return '\n\n'.join(parts) if parts else t(language, 'generic_error')
+
+
+def _invalid_channel_input_text(language: str, inputs: list[ParsedChannelInput]) -> str:
+    invalids = [item.raw for item in inputs if item.error]
+    lines = [t(language, 'invalid_channel_input_title')]
+    for idx, raw in enumerate(invalids, start=1):
+        lines.append(f'{idx}. {raw}')
+    lines.append('')
+    lines.append(t(language, 'channel_input_format_help'))
+    return '\n'.join(lines)
+
+
+async def _validate_and_resolve_inputs(
     bot,
-    repo: Repository,
     db_user: User,
     language: str,
-    raw: str,
-    by_order: bool,
-) -> tuple[bool, str | None, list[dict], bool]:
+    inputs: list[ParsedChannelInput],
+    repo: Repository,
+) -> ChannelValidationResult:
     settings = get_settings()
     _, channel_limit = await user_limits(repo, db_user, settings)
-    parsed = parse_channel_list(raw, by_order)
-    if len(parsed) < 2 or len(parsed) > channel_limit:
-        return False, t(language, 'channel_count_error', limit=channel_limit), [], False
+    if len(inputs) < 2 or len(inputs) > channel_limit:
+        return ChannelValidationResult(False, [], t(language, 'channel_count_error', limit=channel_limit))
+
+    invalids = [item for item in inputs if item.error]
+    if invalids:
+        return ChannelValidationResult(False, [], _invalid_channel_input_text(language, inputs), parsed_inputs=inputs)
+
+    missing = [item for item in inputs if item.missing]
+    if missing:
+        return ChannelValidationResult(
+            ok=False,
+            channels=[],
+            error_text=_missing_channel_info_text(language, inputs),
+            needs_more_info=True,
+            parsed_inputs=inputs,
+        )
 
     checks: list[ChannelCheckResult] = []
-    for order_no, value in parsed:
-        checks.append(await resolve_and_check_channel(bot, value, order_no))
+    for item in inputs:
+        checks.append(await resolve_and_check_channel(bot, item, item.order_no))
 
     resolved = [c for c in checks if c.chat_id is not None]
     ids = [c.chat_id for c in resolved]
     if len(ids) != len(set(ids)):
-        return False, t(language, 'duplicate_channels'), [], False
-
-    unsupported_invites = [c for c in checks if c.error == 'unsupported_private_invite']
-    if unsupported_invites:
-        lines = []
-        for err in unsupported_invites:
-            lines.append(t(language, 'unsupported_channel_input', value=err.input_value))
-        return False, '\n\n'.join(lines), [], False
+        return ChannelValidationResult(False, [], t(language, 'duplicate_channels'), parsed_inputs=inputs)
 
     errors = [c for c in checks if not c.ok]
     if errors:
@@ -130,7 +207,7 @@ async def _validate_and_resolve_channels(
                 lines.append(f'{idx}. {err.input_value}')
         lines.append('')
         lines.append(t(language, 'missing_admin_footer'))
-        return False, '\n'.join(lines), [], True
+        return ChannelValidationResult(False, [], '\n'.join(lines), can_recheck=True, parsed_inputs=inputs)
 
     channels = [
         {
@@ -138,11 +215,24 @@ async def _validate_and_resolve_channels(
             'title': c.title,
             'username': c.username,
             'channel_link': c.channel_link,
+            'invite_link': c.invite_link,
             'order_no': int(c.order_no or idx),
         }
         for idx, c in enumerate(checks, start=1)
     ]
-    return True, None, channels, False
+    return ChannelValidationResult(True, channels, parsed_inputs=inputs)
+
+
+async def _validate_and_resolve_channels(
+    bot,
+    repo: Repository,
+    db_user: User,
+    language: str,
+    raw: str,
+    by_order: bool,
+) -> ChannelValidationResult:
+    inputs = parse_channel_list(raw, by_order)
+    return await _validate_and_resolve_inputs(bot, db_user, language, inputs, repo)
 
 
 @router.message(F.text.in_(_add_buttons()))
@@ -196,21 +286,78 @@ async def add_channels(message: Message, state: FSMContext, repo: Repository, db
     raw = (message.text or '').strip()
     data = await state.get_data()
     style = data.get('repost_style', 'random')
-    ok, error_text, channels, can_recheck = await _validate_and_resolve_channels(
-        message.bot, repo, db_user, language, raw, by_order=style == 'by_order'
+    result = await _validate_and_resolve_channels(
+        message.bot,
+        repo,
+        db_user,
+        language,
+        raw,
+        by_order=style == 'by_order',
     )
-    await state.update_data(raw_channels=raw)
-    if not ok:
-        await state.set_state(AddPairStates.admin_missing)
+    await state.update_data(
+        raw_channels=raw,
+        channel_inputs=_serialize_channel_inputs(result.parsed_inputs or []),
+    )
+    if not result.ok:
+        if result.needs_more_info:
+            await state.set_state(AddPairStates.waiting_channel_missing)
+            await update_flow_message(
+                message.bot,
+                state,
+                message.chat.id,
+                result.error_text or t(language, 'generic_error'),
+                flow_nav_keyboard(language),
+            )
+            return
+        await state.set_state(AddPairStates.admin_missing if result.can_recheck else AddPairStates.waiting_channels)
         await update_flow_message(
             message.bot,
             state,
             message.chat.id,
-            error_text or t(language, 'generic_error'),
-            recheck_keyboard(language, 'add') if can_recheck else flow_nav_keyboard(language),
+            result.error_text or t(language, 'generic_error'),
+            recheck_keyboard(language, 'add') if result.can_recheck else flow_nav_keyboard(language),
         )
         return
-    await state.update_data(channels=channels)
+    await state.update_data(channels=result.channels)
+    await _show_movie(message, state, language)
+
+
+@router.message(AddPairStates.waiting_channel_missing)
+async def add_missing_channel_info(message: Message, state: FSMContext, repo: Repository, db_user: User, language: str) -> None:
+    data = await state.get_data()
+    inputs = _load_channel_inputs(data)
+    inputs, changed = merge_missing_channel_info(inputs, (message.text or '').strip())
+    if not changed:
+        await update_flow_message(
+            message.bot,
+            state,
+            message.chat.id,
+            _missing_channel_info_text(language, inputs),
+            flow_nav_keyboard(language),
+        )
+        return
+    result = await _validate_and_resolve_inputs(message.bot, db_user, language, inputs, repo)
+    await state.update_data(channel_inputs=_serialize_channel_inputs(result.parsed_inputs or inputs))
+    if not result.ok:
+        if result.needs_more_info:
+            await update_flow_message(
+                message.bot,
+                state,
+                message.chat.id,
+                result.error_text or t(language, 'generic_error'),
+                flow_nav_keyboard(language),
+            )
+            return
+        await state.set_state(AddPairStates.admin_missing if result.can_recheck else AddPairStates.waiting_channel_missing)
+        await update_flow_message(
+            message.bot,
+            state,
+            message.chat.id,
+            result.error_text or t(language, 'generic_error'),
+            recheck_keyboard(language, 'add') if result.can_recheck else flow_nav_keyboard(language),
+        )
+        return
+    await state.update_data(channels=result.channels)
     await _show_movie(message, state, language)
 
 
@@ -218,21 +365,34 @@ async def add_channels(message: Message, state: FSMContext, repo: Repository, db
 async def add_recheck(callback: CallbackQuery, state: FSMContext, repo: Repository, db_user: User, language: str) -> None:
     await callback.answer()
     data = await state.get_data()
-    raw = data.get('raw_channels', '')
-    style = data.get('repost_style', 'random')
-    ok, error_text, channels, can_recheck = await _validate_and_resolve_channels(
-        callback.bot, repo, db_user, language, raw, by_order=style == 'by_order'
-    )
-    if not ok:
+    inputs = _load_channel_inputs(data)
+    if not inputs:
+        raw = data.get('raw_channels', '')
+        style = data.get('repost_style', 'random')
+        inputs = parse_channel_list(raw, by_order=style == 'by_order')
+    result = await _validate_and_resolve_inputs(callback.bot, db_user, language, inputs, repo)
+    await state.update_data(channel_inputs=_serialize_channel_inputs(result.parsed_inputs or inputs))
+    if not result.ok:
+        if result.needs_more_info:
+            await state.set_state(AddPairStates.waiting_channel_missing)
+            await update_flow_message(
+                callback.bot,
+                state,
+                callback.message.chat.id,
+                result.error_text or t(language, 'generic_error'),
+                flow_nav_keyboard(language),
+            )
+            return
+        await state.set_state(AddPairStates.admin_missing if result.can_recheck else AddPairStates.waiting_channels)
         await update_flow_message(
             callback.bot,
             state,
             callback.message.chat.id,
-            error_text or t(language, 'generic_error'),
-            recheck_keyboard(language, 'add') if can_recheck else flow_nav_keyboard(language),
+            result.error_text or t(language, 'generic_error'),
+            recheck_keyboard(language, 'add') if result.can_recheck else flow_nav_keyboard(language),
         )
         return
-    await state.update_data(channels=channels)
+    await state.update_data(channels=result.channels)
     await _show_movie(callback, state, language)
 
 
@@ -283,6 +443,7 @@ async def add_back_to_pair_no(callback: CallbackQuery, state: FSMContext, langua
 
 
 @router.callback_query(AddPairStates.waiting_channels, F.data == 'flow:back')
+@router.callback_query(AddPairStates.waiting_channel_missing, F.data == 'flow:back')
 @router.callback_query(AddPairStates.admin_missing, F.data == 'flow:back')
 async def add_back_to_style(callback: CallbackQuery, state: FSMContext, language: str) -> None:
     await callback.answer()

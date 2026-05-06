@@ -197,6 +197,7 @@ class Repository:
                     username=ch.get('username'),
                     title=ch.get('title') or str(ch['chat_id']),
                     channel_link=ch.get('channel_link'),
+                    invite_link=ch.get('invite_link'),
                     order_no=int(ch.get('order_no') or idx),
                     bot_admin_ok=True,
                     last_admin_check_at=datetime.now(timezone.utc),
