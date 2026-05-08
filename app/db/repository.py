@@ -385,6 +385,36 @@ class Repository:
         )
         return result.scalar_one_or_none()
 
+    async def get_loop_event_by_created_unit(
+        self,
+        chat_id: int,
+        first_message_id: int,
+        last_message_id: int,
+    ) -> LoopEvent | None:
+        """Return the loop event for a bot-created post unit.
+
+        The loop event is written immediately after Telegram returns the created
+        message id. On busy polling/webhook deployments, the channel_post update
+        for that created message can arrive before the database commit becomes
+        visible. Callers should retry this lookup briefly before treating a
+        bot-created post as a normal channel post.
+
+        Albums are saved as one post unit, so this also accepts a first/last
+        message range instead of only one exact message id.
+        """
+        result = await self.session.execute(
+            select(LoopEvent)
+            .where(
+                LoopEvent.to_chat_id == chat_id,
+                LoopEvent.to_message_id >= first_message_id,
+                LoopEvent.to_message_id <= last_message_id,
+                LoopEvent.created_by_bot.is_(True),
+            )
+            .order_by(LoopEvent.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_loop_state(self, loop_id: str) -> LoopState | None:
         result = await self.session.execute(select(LoopState).where(LoopState.loop_id == loop_id))
         return result.scalar_one_or_none()
