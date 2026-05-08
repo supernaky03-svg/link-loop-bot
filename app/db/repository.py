@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Sequence
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -451,11 +451,34 @@ class Repository:
             await self.session.rollback()
             logger.info('duplicate loop event ignored', extra={'loop_id': loop_id, 'pair_id': pair_id})
 
-    async def update_loop_index(self, loop_id: str, current_index: int, status: str = 'running') -> None:
+    async def update_loop_index(
+        self,
+        loop_id: str,
+        current_index: int,
+        status: str = "running",
+    ) -> None:
+        """
+        Keep loop progress monotonic.
+        
+        Race case:
+        A->B sender may update index to 1 after B->C continuation already
+        updated it to 2. We must not move current_index backward.
+        Also, once status is done, do not revert it back to running.
+        """
+        
         await self.session.execute(
             update(LoopState)
             .where(LoopState.loop_id == loop_id)
-            .values(current_index=current_index, status=status)
+            .values(
+                current_index=case(
+                    (LoopState.current_index < current_index, current_index),
+                    else_=LoopState.current_index,
+                ),
+                status=case(
+                    (LoopState.status == "done", LoopState.status),
+                    else_=status,
+                ),
+            )
         )
         await self.session.commit()
 
