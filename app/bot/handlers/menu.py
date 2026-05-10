@@ -67,9 +67,10 @@ async def help_message(message: Message, language: str) -> None:
 
 @router.message(F.text.in_(_all_button_keys('my_pairs')))
 async def my_pairs(message: Message, repo: Repository, db_user: User, language: str) -> None:
-    pairs = await repo.get_user_pairs(db_user.id)
+    pairs = await repo.get_user_pairs(db_user.id, active_only=True)
     if not pairs:
         await message.answer(t(language, 'no_pairs'))
         return
+
     text = '\n\n'.join(pair_details(pair) for pair in pairs)
     await message.answer(t(language, 'my_pairs', pairs=text))
