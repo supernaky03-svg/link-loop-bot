@@ -160,11 +160,11 @@ TEXTS: dict[str, str] = {
 
 BUTTONS: dict[str, str] = {
     'add_pair': '➕ Add Pair',
-    'remove_pair': ' Remove Pair',
-    'edit_style': ' Edit Repost Style',
-    'edit_movie': ' Edit Movie Rule',
-    'my_pairs': ' My Pairs',
-    'language': ' Language',
+    'remove_pair': '🗑 Remove Pair',
+    'edit_style': '🔁 Edit Repost Style',
+    'edit_movie': '🎬 Edit Movie Rule',
+    'my_pairs': '📋 My Pairs',
+    'language': '🌐 Language',
     'contact_admin': '☎️ Contact Admin',
     'help': '❓ Help',
 }
