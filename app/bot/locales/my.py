@@ -160,11 +160,11 @@ TEXTS: dict[str, str] = {
 
 BUTTONS: dict[str, str] = {
     'add_pair': '➕ Pair ထည့်မယ်',
-    'remove_pair': ' Pair ဖျက်မယ်',
-    'edit_style': ' Repost Style ပြင်မယ်',
-    'edit_movie': ' Movie Rule ပြင်မယ်',
-    'my_pairs': ' ကျွန်ုပ်၏ Pair များ',
-    'language': ' ဘာသာစကား',
+    'remove_pair': '🗑 Pair ဖျက်မယ်',
+    'edit_style': '🔁 Repost Style ပြင်မယ်',
+    'edit_movie': '🎬 Movie Rule ပြင်မယ်',
+    'my_pairs': '📋 ကျွန်ုပ်၏ Pair များ',
+    'language': '🌐 ဘာသာစကား',
     'contact_admin': '☎️ Admin ဆက်သွယ်ရန်',
     'help': '❓ အကူအညီ',
 }
