@@ -139,12 +139,22 @@ class Repository:
         result = await self.session.execute(stmt)
         return list(result.scalars().unique())
 
-    async def get_pair_by_no(self, user_id: int, pair_no: int) -> Pair | None:
-        result = await self.session.execute(
+    async def get_pair_by_no(
+        self,
+        user_id: int,
+        pair_no: int,
+        active_only: bool = True,
+    ) -> Pair | None:
+        stmt = (
             select(Pair)
             .options(selectinload(Pair.channels), selectinload(Pair.user))
             .where(Pair.user_id == user_id, Pair.pair_no == pair_no)
         )
+        
+        if active_only:
+            stmt = stmt.where(Pair.is_active.is_(True))
+            
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_pair(self, pair_id: int) -> Pair | None:
@@ -156,8 +166,14 @@ class Repository:
         return result.scalar_one_or_none()
 
     async def get_next_pair_no(self, user_id: int) -> int:
-        numbers = await self.session.scalars(select(Pair.pair_no).where(Pair.user_id == user_id))
+        numbers = await self.session.scalars(
+            select(Pair.pair_no).where(
+                Pair.user_id == user_id,
+                Pair.is_active.is_(True),
+            )
+        )
         used = set(numbers.all())
+        
         n = 1
         while n in used:
             n += 1
@@ -179,18 +195,38 @@ class Repository:
         movie_rule: bool,
         channels: Sequence[dict],
     ) -> Pair:
-        pair = Pair(
+        existing = await self.get_pair_by_no(
             user_id=user_id,
             pair_no=pair_no,
-            repost_style=repost_style,
-            movie_rule=movie_rule,
-            is_active=True,
-            is_paused=False,
+            active_only=False,
         )
-        self.session.add(pair)
-        await self.session.flush()
+        
+        if existing and existing.is_active:
+            raise ValueError(f'Active pair {pair_no} already exists for user {user_id}')
+            
+        if existing:
+            pair = existing
+            pair.repost_style = repost_style
+            pair.movie_rule = movie_rule
+            pair.is_active = True
+            pair.is_paused = False
+            pair.paused_reason = None
+            pair.channels = []
+            await self.session.flush()
+        else:
+            pair = Pair(
+                user_id=user_id,
+                pair_no=pair_no,
+                repost_style=repost_style,
+                movie_rule=movie_rule,
+                is_active=True,
+                is_paused=False,
+            )
+            self.session.add(pair)
+            await self.session.flush()
+            
         for idx, ch in enumerate(channels, start=1):
-            self.session.add(
+            pair.channels.append(
                 PairChannel(
                     pair_id=pair.id,
                     chat_id=int(ch['chat_id']),
@@ -200,7 +236,7 @@ class Repository:
                     invite_link=ch.get('invite_link'),
                     order_no=int(ch.get('order_no') or idx),
                     bot_admin_ok=True,
-                    last_admin_check_at=datetime.now(timezone.utc),
+                    last_admin_check_at=datetime.now(timezone) 
                 )
             )
         await self.session.commit()
