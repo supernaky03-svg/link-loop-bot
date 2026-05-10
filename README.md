@@ -1,23 +1,370 @@
+Deplover- Thar Sett Nyan
+Deplover county- Myanmar 
+
 # Telegram Channel Link Loop Bot
 
-Production-ready Telegram channel link loop bot using **aiogram v3**, **async SQLAlchemy**, **PostgreSQL/Neon**, and a small **aiohttp health endpoint** for Render + UptimeRobot.
+Production-ready Telegram channel repost/link-loop bot built with **aiogram v3**, **async SQLAlchemy**, **PostgreSQL/Neon**, and an **aiohttp health endpoint** for Render + UptimeRobot.
 
-## 1. Architecture summary
+This bot is designed for channel chains such as:
 
-The bot uses one Telegram Bot Token and watches `channel_post` updates from channels where the bot is admin. Users create numbered channel pairs. Each pair contains 2 or more channels, default maximum 6. When a post appears in a channel that belongs to an active pair, the bot builds a route and reposts the cached post unit through the route.
+```text
+A → B → C → D
+A → C → B → D
+D → A → B → C
+```
 
-Main flow:
+The original post can come from **any channel inside the pair**. The source channel is always placed first in the route, and the other channels are ordered by the selected repost style.
 
-1. `channel_posts.py` receives channel posts.
-2. `AlbumCollector` waits for album items with the same `media_group_id` and saves them as one post unit.
-3. `movie_rule_service.py` saves each post unit into PostgreSQL and keeps only the latest 50 units per channel.
-4. `repost_service.py` starts or continues a loop.
-5. `loop_states`, `loop_events`, and `processed_updates` prevent duplicate processing and infinite independent loops.
-6. `permissions.py` listens to `my_chat_member` updates, pauses pairs when permission is removed, reports to admin group, and reactivates pairs after admin permission is restored.
+---
 
-Important Telegram Bot API limitation: a bot cannot join private channels by invite link like a user account. For private channels, add the bot as admin first, then provide the numeric `-100...` channel ID. Public `@username` and `https://t.me/username` links are supported.
+## 1. Main Features
 
-## 2. Complete file structure
+- Multi-user Telegram bot
+- Pair-based channel loop system
+- 2 or more channels per pair
+- Default channel limit per pair: 6
+- Public channel link support: `@username`, `https://t.me/username`
+- Private channel support by numeric `-100...` chat ID
+- Album/media group repost support
+- Movie Rule support
+- Always Random route mode
+- By Order route mode
+- Visible link removal from text/caption
+- Delayed footer edit workflow
+- Duplicate update protection
+- Bot-created post loop protection
+- Admin/user permission monitoring
+- English and Myanmar language support
+- Render deployment support
+- UptimeRobot health check support
+
+---
+
+## 2. Important Telegram Limitation
+
+This project uses a **Telegram Bot Token**, not a user account session.
+
+A Telegram bot cannot join private channels by invite link like a normal Telegram user account. For private channels:
+
+1. Add the bot to the private channel first.
+2. Give the bot admin permission.
+3. Give the bot **Post Messages** permission.
+4. Use the numeric channel ID, for example:
+
+```text
+-1001234567890
+```
+
+For public channels, you can use:
+
+```text
+@channelusername
+https://t.me/channelusername
+```
+
+---
+
+## 3. New Repost Workflow
+
+The new workflow does **not** wait for Channel 2's repost update before sending to Channel 3.
+
+Instead, it works like this:
+
+```text
+1. Detect original post source channel.
+2. Build route.
+3. Send the original content to all target channels first.
+4. Strip visible links during send.
+5. Save created message IDs per channel.
+6. Wait 15 seconds.
+7. Edit the sent posts and add footer links.
+```
+
+This greatly reduces the bug where the repost reaches Channel 2 but does not continue to Channel 3.
+
+---
+
+## 4. Route Rules
+
+Assume a pair contains these channels:
+
+```text
+A, B, C, D
+```
+
+### Source Channel Rule
+
+The channel where the original post appears is always first.
+
+Example:
+
+```text
+Original post appears in A
+Route = A → other channels
+```
+
+If the original post appears in D:
+
+```text
+Route = D → other channels
+```
+
+---
+
+## 5. Repost Styles
+
+During pair creation, the user chooses one repost style.
+
+### 5.1 Always Random
+
+`Always Random` means every new post gets a fresh random route.
+
+Example:
+
+```text
+First post source = A
+Route = A → B → C → D
+
+Second post source = A
+Route = A → C → B → D
+
+Third post source = D
+Route = D → A → B → C
+```
+
+The source channel is never shuffled into the middle. It always stays first.
+
+Only the remaining channels are shuffled.
+
+### 5.2 By Order
+
+`By Order` means the source channel is first, and the other channels follow the order saved by the user.
+
+Example saved order:
+
+```text
+A = 1
+B = 2
+C = 3
+D = 4
+```
+
+If source is A:
+
+```text
+A → B → C → D
+```
+
+If source is C:
+
+```text
+C → A → B → D
+```
+
+---
+
+## 6. Footer Logic
+
+The repost content always comes from the original source post.
+
+The footer link always points to the previous channel in the route.
+
+Example route:
+
+```text
+A → C → B → D
+```
+
+### Channel C footer
+
+```text
+channel join - Channel A link
+ကြည့်ရန်လင့် - Channel A original post link
+```
+
+### Channel B footer
+
+```text
+channel join - Channel C link
+ကြည့်ရန်လင့် - Channel C reposted post link
+```
+
+### Channel D footer
+
+```text
+channel join - Channel B link
+ကြည့်ရန်လင့် - Channel B reposted post link
+```
+
+Important rule:
+
+```text
+Content source = original post
+Footer source = previous channel's created post
+```
+
+Channel B does not reuse Channel C's reposted content.
+Channel D does not reuse Channel B's reposted content.
+All target channels receive the original post content.
+
+---
+
+## 7. Link Removal Rule
+
+Visible links are removed from original text/caption before reposting.
+
+Examples of visible links that should be removed:
+
+```text
+https://example.com
+http://example.com
+www.example.com
+t.me/example
+telegram.me/example
+https://t.me/example
+```
+
+The bot should not intentionally remove:
+
+```text
+hidden text links
+inline buttons
+native forward metadata
+Telegram media internals
+```
+
+For albums, visible links are stripped during the first send phase. After 15 seconds, the first album item's caption is edited to include the footer.
+
+---
+
+## 8. Movie Rule
+
+Movie Rule is optional per pair.
+
+### Movie Rule OFF
+
+Every supported post is looped.
+
+```text
+Text → loop
+Photo → loop
+Album → loop
+Video → loop
+```
+
+### Movie Rule ON
+
+The bot reacts only when a video post appears.
+
+But it does **not** repost the video itself.
+
+Instead, it reposts the previous cached post unit.
+
+Example:
+
+```text
+Channel A
+Post 1 = image / album / text / movie preview
+Post 2 = video
+```
+
+When Post 2 video appears:
+
+```text
+Bot uses Post 2 as trigger
+Bot reposts Post 1 as content
+```
+
+Then the normal fan-out and delayed edit workflow runs.
+
+---
+
+## 9. Example Full Workflow
+
+Pair channels:
+
+```text
+A, B, C, D
+```
+
+Original post appears in A.
+
+Always Random route generated:
+
+```text
+A → C → B → D
+```
+
+### Step 1 — Send phase
+
+The bot sends A's original post to:
+
+```text
+C
+B
+D
+```
+
+Visible links are removed before sending.
+
+### Step 2 — Save message IDs
+
+```text
+C created_post_id = 101
+B created_post_id = 205
+D created_post_id = 77
+```
+
+### Step 3 — Wait
+
+```text
+15 seconds
+```
+
+### Step 4 — Edit phase
+
+C post is edited with A footer:
+
+```text
+channel join - A channel link
+ကြည့်ရန်လင့် - A original post link
+```
+
+B post is edited with C footer:
+
+```text
+channel join - C channel link
+ကြည့်ရန်လင့် - C created post link
+```
+
+D post is edited with B footer:
+
+```text
+channel join - B channel link
+ကြည့်ရန်လင့် - B created post link
+```
+
+---
+
+## 10. Bot-created Post Protection
+
+When the bot reposts into another channel, Telegram may send that repost back to the bot as a `channel_post` update.
+
+The bot must not treat that repost as a new original post.
+
+Expected behavior:
+
+```text
+Bot-created post update received
+→ detect it from loop event / processed storage
+→ ignore it as original source
+```
+
+This prevents infinite loops and duplicated repost chains.
+
+---
+
+## 11. Project Structure
 
 ```text
 app/
@@ -77,91 +424,34 @@ render.yaml
 requirements.txt
 ```
 
-## 3. Database setup
+---
 
-This project uses auto-create table logic:
+## 12. Database Tables
 
-```python
-await init_db()
-```
+The project uses SQLAlchemy auto-create logic on startup.
 
-On startup, SQLAlchemy creates these tables if missing:
-
-- `users`
-- `settings`
-- `pairs`
-- `pair_channels`
-- `post_units`
-- `post_items`
-- `loop_states`
-- `loop_events`
-- `processed_updates`
-- `admin_reports`
-
-For a larger commercial deployment, replace auto-create with Alembic migrations later. The current version is ready for a small/medium Render + Neon deployment.
-
-## 4. Neon DB setup guide
-
-1. Go to Neon and create a new PostgreSQL project.
-2. Choose a region close to your Render region when possible.
-3. Open **Connection Details**.
-4. Copy the pooled or direct connection string.
-5. Make sure it looks like:
-
-```env
-DATABASE_URL=postgresql://USER:PASSWORD@HOST.neon.tech/DBNAME?sslmode=require
-```
-
-The code automatically converts it to `postgresql+asyncpg://...` and moves `sslmode=require` into asyncpg SSL connect arguments.
-
-## 5. Render deployment guide
-
-### Option A: Manual Render setup
-
-1. Push this project to GitHub.
-2. Render → New → Web Service.
-3. Select your GitHub repo.
-4. Runtime: Python.
-5. Build command:
-
-```bash
-pip install -r requirements.txt
-```
-
-6. Start command:
-
-```bash
-python -m app.main
-```
-
-7. Add environment variables from `.env.example`.
-8. Set health check path:
+Expected tables:
 
 ```text
-/healthz
+users
+settings
+pairs
+pair_channels
+post_units
+post_items
+loop_states
+loop_events
+processed_updates
+admin_reports
 ```
 
-9. Deploy.
+For a larger production system, use Alembic migrations later.
 
-### Option B: render.yaml
+---
 
-This repo includes `render.yaml`:
+## 13. Environment Variables
 
-```yaml
-services:
-  - type: web
-    name: channel-link-loop-bot
-    env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m app.main
-    healthCheckPath: /healthz
-    autoDeploy: true
-```
-
-Render can detect this blueprint.
-
-## 6. Required environment variables
+Create `.env` from `.env.example`:
 
 ```env
 BOT_TOKEN=123456:ABCDEF
@@ -184,18 +474,73 @@ ADMIN_CONTACT=@mnsm6003
 
 `USER_LIMIT=0` means unlimited users.
 
-## 7. UptimeRobot setup guide
+---
 
-1. UptimeRobot → Add New Monitor.
-2. Type: HTTP(s).
-3. URL:
+## 14. Neon DB Setup
+
+1. Create a PostgreSQL project on Neon.
+2. Choose a region close to your Render region.
+3. Open connection details.
+4. Copy the connection string.
+5. Add it to Render environment variables as `DATABASE_URL`.
+
+Example:
+
+```env
+DATABASE_URL=postgresql://USER:PASSWORD@HOST.neon.tech/DBNAME?sslmode=require
+```
+
+The app converts the URL for asyncpg internally if the code supports it.
+
+---
+
+## 15. Render Deployment
+
+### Build command
+
+```bash
+pip install -r requirements.txt
+```
+
+### Start command
+
+```bash
+python -m app.main
+```
+
+### Health check path
+
+```text
+/healthz
+```
+
+### Correct `render.yaml`
+
+```yaml
+services:
+  - type: web
+    name: channel-link-loop-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.main
+    healthCheckPath: /healthz
+    autoDeploy: true
+```
+
+---
+
+## 16. UptimeRobot Setup
+
+1. Create a new HTTP monitor.
+2. Use your Render URL.
+3. Add `/healthz` at the end.
+
+Example:
 
 ```text
 https://YOUR-RENDER-APP.onrender.com/healthz
 ```
-
-4. Interval: 5 minutes.
-5. Save.
 
 Expected response:
 
@@ -203,37 +548,26 @@ Expected response:
 {"ok": true}
 ```
 
-## 8. Admin command usage
+---
+
+## 17. Admin Commands
 
 ### `/status`
 
-Shows all registered users:
-
-```text
-────────── User 1 ──────────
-Username: @example
-User ID: 123456789
-Pair Count: 2
-Total Channels: 8
-Banned: No
-Pair Limit: 10
-Channel Per Pair Limit: 6
-```
+Shows users, pair count, total channels, ban status, and limits.
 
 ### `/ban user_id_or_username`
 
 ```text
 /ban 123456789
-/ban @example
+/ban @username
 ```
-
-Banned normal users receive no response.
 
 ### `/unban user_id_or_username`
 
 ```text
 /unban 123456789
-/unban @example
+/unban @username
 ```
 
 ### `/set_pair_limit user_id count`
@@ -251,7 +585,7 @@ Banned normal users receive no response.
 ### `/set_ch_p_pair user_id count`
 
 ```text
-/set_ch_p_pair 123456789 8
+/set_ch_p_pair 123456789 6
 ```
 
 ### `/set_default_ch_p_pair count`
@@ -266,215 +600,147 @@ Banned normal users receive no response.
 /user_limit 100
 ```
 
-If total registered users reaches this number, new users receive no response. Existing users continue unless banned.
+Use `0` for unlimited users.
 
-## 9. User guide — English
+---
+
+## 18. User Guide — English
 
 ### First setup
 
 1. Start the bot with `/start`.
-2. Add the bot as admin in every channel you want to use.
+2. Add the bot as admin in every channel.
 3. Give the bot **Post Messages** permission.
-4. For public channels, you can use `@username` or `https://t.me/username`.
-5. For private channels, add the bot as admin first and use numeric `-100...` chat ID.
+4. Use public channel username/link or private numeric channel ID.
+5. Create a pair from the bot menu.
 
 ### Add Pair
 
-Menu → `➕ Add Pair`
+Menu:
+
+```text
+➕ Add Pair
+```
 
 Steps:
 
-1. Send pair number or press Auto.
+```text
+1. Choose pair number or Auto.
 2. Choose repost style:
-   - Random
+   - Always Random
    - By Order
 3. Send channel links/IDs.
 4. Choose Movie Rule ON/OFF.
 5. Confirm.
+```
 
-### Random style
+---
 
-If pair contains A, B, C and source is A:
-
-- A → B → C, or
-- A → C → B
-
-The destination order is shuffled each loop.
-
-### By Order style
-
-If order is A=1, B=2, C=3:
-
-- Source is first.
-- Other channels are sorted by order number.
-
-Examples:
-
-- A source: A → B → C
-- B source: B → A → C
-- C source: C → A → B
-
-### Movie Rule
-
-Movie Rule OFF:
-
-- Every post is looped.
-
-Movie Rule ON:
-
-- The bot reacts only when a video post appears.
-- It does not loop the video itself.
-- It loops the post immediately above that video if that previous post was already captured by the bot.
-- Albums are reposted as albums.
-
-## 10. User guide — Myanmar
+## 19. User Guide — Myanmar
 
 ### စတင်အသုံးပြုနည်း
 
 1. Bot ကို `/start` လုပ်ပါ။
 2. အသုံးပြုမည့် channel တိုင်းတွင် bot ကို admin ထည့်ပါ။
-3. **Post Messages** permission ပေးပါ။
-4. Public channel ဆိုလျှင် `@username` သို့မဟုတ် `https://t.me/username` သုံးနိုင်သည်။
-5. Private channel ဆိုလျှင် bot ကို admin အရင်ထည့်ပြီး `-100...` chat ID ကို သုံးပါ။
+3. Bot ကို **Post Messages** permission ပေးပါ။
+4. Public channel ဆို `@username` သို့မဟုတ် `https://t.me/username` သုံးပါ။
+5. Private channel ဆို bot ကို admin အရင်ထည့်ပြီး `-100...` channel ID သုံးပါ။
 
 ### Pair ထည့်နည်း
 
-Menu → `➕ Pair ထည့်မယ်`
+Menu:
+
+```text
+➕ Pair ထည့်မယ်
+```
 
 အဆင့်များ:
 
-1. Pair number ပို့ပါ သို့မဟုတ် Auto နှိပ်ပါ။
+```text
+1. Pair number ရွေးပါ သို့မဟုတ် Auto နှိပ်ပါ။
 2. Repost style ရွေးပါ:
-   - Random
+   - အမြဲ ကျပန်း
    - အစဉ်လိုက်
 3. Channel links/IDs များပို့ပါ။
 4. Movie Rule ON/OFF ရွေးပါ။
 5. အတည်ပြုပါ။
+```
 
-### Random style
+---
 
-A, B, C ဆိုလျှင် A မှ post တက်လာသောအခါ:
+## 20. Manual Test Checklist
 
-- A → B → C သို့မဟုတ်
-- A → C → B
+### Startup
 
-စနစ်က loop တစ်ကြိမ်တိုင်း destination order ကို random လုပ်သည်။
-
-### အစဉ်လိုက် style
-
-Order သည် A=1, B=2, C=3 ဖြစ်လျှင်:
-
-- Source channel ကို အရင်ထားမည်။
-- ကျန် channel များကို order number အတိုင်းစီမည်။
-
-ဥပမာ:
-
-- A source: A → B → C
-- B source: B → A → C
-- C source: C → A → B
-
-### Movie Rule
-
-Movie Rule OFF:
-
-- Post တိုင်း loop ပတ်မည်။
-
-Movie Rule ON:
-
-- Video post တက်လာမှသာ bot အလုပ်လုပ်မည်။
-- Video post ကိုယ်တိုင်ကို loop မပတ်ပါ။
-- အဲဒီ video အပေါ်က post ကို bot cache ထဲရှိပါက loop ပတ်မည်။
-- Album ဖြစ်လျှင် album အတိုင်း ပြန်တင်မည်။
-
-## 11. Manual test checklist
-
-### Basic startup
-
-- [ ] `python -m app.main` starts without syntax/import error.
-- [ ] `/healthz` returns 200 OK.
+- [ ] `python -m app.main` starts without error.
+- [ ] `/healthz` returns OK.
 - [ ] Tables are created in Neon.
 - [ ] `/start` shows reply keyboard.
 
-### Language
-
-- [ ] Change language to English.
-- [ ] Change language to Myanmar.
-- [ ] Main menu button text changes.
-
-### Add Pair
+### Pair creation
 
 - [ ] Auto pair number works.
 - [ ] Existing pair number is rejected.
-- [ ] Pair limit is enforced.
 - [ ] Channel count below 2 is rejected.
 - [ ] Channel count above limit is rejected.
 - [ ] Duplicate channels are rejected.
-- [ ] Missing admin permission shows missing list.
-- [ ] Recheck works after permission is fixed.
+- [ ] Missing admin permission shows warning.
 - [ ] Confirm saves pair.
 
-### Remove Pair
+### Always Random
 
-- [ ] Select pair.
-- [ ] Confirmation shows details.
-- [ ] Confirm marks pair inactive.
-- [ ] Removed pair no longer triggers admin reports.
+- [ ] Post 1 route is random.
+- [ ] Post 2 route changes again.
+- [ ] Source channel always stays first.
+- [ ] Other channels are shuffled.
 
-### Edit Repost Style
+### By Order
 
-- [ ] Random style saves.
-- [ ] By Order asks for order.
-- [ ] Invalid order is rejected.
-- [ ] Valid order saves.
+- [ ] Source channel stays first.
+- [ ] Other channels follow saved order.
 
-### Edit Movie Rule
+### Basic repost
 
-- [ ] ON saves.
-- [ ] OFF saves.
+- [ ] Text post reposts to all target channels.
+- [ ] Photo post reposts to all target channels.
+- [ ] Album reposts as album.
+- [ ] Created message IDs are saved.
+- [ ] Footer is added after 15 seconds.
+- [ ] Visible links are removed.
+- [ ] Bot-created posts do not start new loops.
 
-### Link loop
+### Footer chain
 
-- [ ] A text post in A loops to B then C.
-- [ ] Footer on B uses A channel/post link.
-- [ ] Footer on C uses B channel/post link.
-- [ ] Duplicate Telegram updates do not duplicate posts.
-- [ ] Bot-created post does not start a new independent loop.
+For route:
 
-### Album
+```text
+A → C → B → D
+```
 
-- [ ] 2-photo album is cached as one post unit.
-- [ ] Album reposts via `sendMediaGroup`.
-- [ ] Footer is attached to first media item.
-- [ ] Album with more than 10 items is split safely.
+Check:
+
+- [ ] C footer points to A.
+- [ ] B footer points to C.
+- [ ] D footer points to B.
 
 ### Movie Rule
 
-- [ ] OFF loops all posts.
-- [ ] ON ignores normal photo/text posts.
+- [ ] OFF loops every supported post.
+- [ ] ON ignores normal text/photo posts as trigger.
 - [ ] ON reacts to video post.
-- [ ] ON loops previous cached post, not the video.
-- [ ] Previous album is looped as album.
-- [ ] Missing previous post logs warning and does not crash.
+- [ ] ON reposts previous cached post, not video.
+- [ ] Previous album reposts as album.
+- [ ] Missing previous cached post does not crash.
 
-### Permission monitoring
+### Permissions
 
-- [ ] Removing bot admin permission pauses active pairs using that channel.
-- [ ] Report is sent to `REPORT_GROUP_ID`.
-- [ ] User is notified.
-- [ ] Restoring admin with Post Messages permission reactivates pairs if all channels are OK.
+- [ ] Removing bot admin permission pauses affected pairs.
+- [ ] Restoring permission reactivates pairs.
+- [ ] Admin report is sent if configured.
 
-### Admin commands
+---
 
-- [ ] `/status` shows all users.
-- [ ] `/ban` blocks user.
-- [ ] `/unban` restores user.
-- [ ] `/set_pair_limit` works.
-- [ ] `/set_default_pair_limit` works.
-- [ ] `/set_ch_p_pair` works.
-- [ ] `/set_default_ch_p_pair` works.
-- [ ] `/user_limit` blocks new users after limit.
-
-## 12. Local run
+## 21. Local Run
 
 ```bash
 python -m venv .venv
@@ -482,12 +748,60 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # fill .env values
-export $(grep -v '^#' .env | xargs)
 python -m app.main
 ```
 
-On Windows PowerShell, set env vars manually or use your hosting panel.
+For Termux, you can also run:
 
-## 13. Notes for production scaling
+```bash
+python -m compileall app tests
+python -m app.main
+```
 
-This project is safe for one Render instance. The album collector is in-memory, so do not run multiple replicas without moving album buffering to Redis or DB. For a high-traffic paid bot, add Alembic migrations, Redis locks, and webhook mode.
+---
+
+## 22. GitHub Update Commands
+
+After changing files:
+
+```bash
+git status
+python -m compileall app tests
+git add app/bot/services/repost_service.py app/bot/handlers/channel_posts.py app/bot/locales/en.py app/bot/locales/my.py README.md
+git commit -m "update link loop workflow"
+git push origin main
+```
+
+---
+
+## 23. Production Notes
+
+This project is suitable for one Render instance.
+
+If traffic becomes high, consider adding:
+
+```text
+Alembic migrations
+Redis lock/cache
+Webhook mode
+Queue worker
+Better retry handling
+Structured logging
+```
+
+The in-memory album collector is not safe for multiple app replicas unless album buffering is moved to Redis or database.
+
+---
+
+## 24. Core Rule Summary
+
+```text
+Original source channel = route[0]
+Always Random = shuffle remaining channels for every new post
+By Order = sort remaining channels by user-defined order
+Content source = original post
+Footer source = previous channel's post link
+Visible links = removed before send
+Footer = added after 15 seconds by editing the sent post
+Bot-created posts = ignored as new original posts
+```
