@@ -236,7 +236,7 @@ class Repository:
                     invite_link=ch.get('invite_link'),
                     order_no=int(ch.get('order_no') or idx),
                     bot_admin_ok=True,
-                    last_admin_check_at=datetime.now(timezone) 
+                    last_admin_check_at=datetime.now(timezone.utc) 
                 )
             )
         await self.session.commit()
