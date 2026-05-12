@@ -214,33 +214,45 @@ async def edit_post_unit_footer(
         )
         return False
 
-
 async def start_loop(
     bot: Bot,
     repo: Repository,
     pair: Pair,
-    unit: PostUnit,
+    units: PostUnit | list[PostUnit],
     source_chat_id: int,
 ) -> None:
-    """Fan out one original post to every other channel, then edit footers later.
-
-    New workflow:
-    1. Build route with the original source channel always first.
-    2. Send the original post to every remaining channel immediately.
-    3. Strip visible links during send.
-    4. Save created message IDs by channel.
-    5. Wait 15 seconds.
-    6. Edit each created post with previous channel + previous post link footer.
-
-    This avoids the old Channel B update -> Channel C continuation dependency.
     """
+    Fan out selected post units to every other channel, then edit footers.
+
+    Movie Rule may pass:
+    - [previous_text]
+    - [previous_image_or_album]
+    - [media_preview, text_preview]
+
+    Footer rule:
+    - If multiple units are selected, footer is added only to the last unit.
+    - Example:
+      [Post 1 image/album, Post 2 text]
+      Post 1 is sent without footer.
+      Post 2 gets footer.
+    """
+    selected_units = units if isinstance(units, list) else [units]
+    selected_units = [selected_unit for selected_unit in selected_units if selected_unit is not None]
+
+    if not selected_units:
+        return
+
     route = build_route(pair, source_chat_id)
     if len(route) < 2:
         return
 
     language = pair.user.language if pair.user else "en"
     loop_id = uuid.uuid4().hex
-    origin_message_id = unit.first_message_id
+
+    # Footer source should point to the last selected original post.
+    # For [image/album, text], footer post link points to the text post.
+    origin_footer_unit = selected_units[-1]
+    origin_message_id = origin_footer_unit.first_message_id
 
     await repo.create_loop_state(
         loop_id=loop_id,
@@ -250,50 +262,84 @@ async def start_loop(
         route_chat_ids=[ch.chat_id for ch in route],
     )
 
-    created_message_ids: dict[int, int] = {source_chat_id: origin_message_id}
+    # For footer chaining:
+    # source channel -> message id of the last selected unit in that channel.
+    footer_message_ids: dict[int, int] = {
+        source_chat_id: origin_message_id,
+    }
 
-    # Send phase: send to all targets first. Do not stop the whole route if one
-    # target fails; later channels can still receive the original content.
+    # For Telegram update protection:
+    # target channel -> created message ids for all selected units.
+    created_by_channel: dict[int, list[int]] = {}
+
+    # Send phase.
+    # Send all selected units to every target channel.
     for index, to_channel in enumerate(route[1:], start=1):
-        created_id = await send_post_unit(bot, unit, to_channel.chat_id)
-        if created_id is None:
-            logger.warning(
-                "fan-out send failed",
-                extra={"pair_id": pair.id, "loop_id": loop_id, "to_chat_id": to_channel.chat_id},
+        created_ids_for_target: list[int] = []
+
+        for selected_unit in selected_units:
+            created_id = await send_post_unit(bot, selected_unit, to_channel.chat_id)
+            if created_id is None:
+                logger.warning(
+                    "fan-out send failed",
+                    extra={
+                        "pair_id": pair.id,
+                        "loop_id": loop_id,
+                        "to_chat_id": to_channel.chat_id,
+                        "post_unit_id": selected_unit.id,
+                    },
+                )
+                continue
+
+            created_ids_for_target.append(created_id)
+
+            previous_channel = route[index - 1]
+            previous_message_id = footer_message_ids.get(
+                previous_channel.chat_id,
+                origin_message_id,
             )
-            continue
 
-        created_message_ids[to_channel.chat_id] = created_id
+            await repo.save_loop_event(
+                loop_id=loop_id,
+                pair_id=pair.id,
+                origin_chat_id=source_chat_id,
+                origin_message_id=origin_message_id,
+                from_chat_id=previous_channel.chat_id,
+                from_message_id=previous_message_id,
+                to_chat_id=to_channel.chat_id,
+                to_message_id=created_id,
+                status="sent",
+            )
 
-        previous_channel = route[index - 1]
-        previous_message_id = created_message_ids.get(previous_channel.chat_id, origin_message_id)
-        await repo.save_loop_event(
-            loop_id=loop_id,
-            pair_id=pair.id,
-            origin_chat_id=source_chat_id,
-            origin_message_id=origin_message_id,
-            from_chat_id=previous_channel.chat_id,
-            from_message_id=previous_message_id,
-            to_chat_id=to_channel.chat_id,
-            to_message_id=created_id,
-            status="sent",
-        )
+        if created_ids_for_target:
+            created_by_channel[to_channel.chat_id] = created_ids_for_target
 
-    if len(created_message_ids) <= 1:
+            # Last selected unit is the footer reference for the next hop.
+            # For [image/album, text], this means the text message id.
+            footer_message_ids[to_channel.chat_id] = created_ids_for_target[-1]
+
+    if not created_by_channel:
         await repo.update_loop_index(loop_id, 0, status="done")
         return
 
     await repo.update_loop_index(loop_id, len(route) - 1, status="sent")
+
     await asyncio.sleep(FOOTER_EDIT_DELAY_SECONDS)
 
-    # Edit phase: each target gets the link of the previous route channel/post.
+    # Edit phase.
+    # Only the last selected unit in each target channel receives the footer.
+    footer_unit = selected_units[-1]
+
     for index, to_channel in enumerate(route[1:], start=1):
-        created_id = created_message_ids.get(to_channel.chat_id)
-        if created_id is None:
+        created_ids = created_by_channel.get(to_channel.chat_id)
+        if not created_ids:
             continue
 
+        footer_target_message_id = created_ids[-1]
+
         previous_channel = route[index - 1]
-        previous_message_id = created_message_ids.get(previous_channel.chat_id)
+        previous_message_id = footer_message_ids.get(previous_channel.chat_id)
+
         if previous_message_id is None:
             logger.warning(
                 "previous hop missing; skip delayed footer edit",
@@ -307,17 +353,17 @@ async def start_loop(
             continue
 
         footer = format_footer(language, previous_channel, previous_message_id)
+
         await edit_post_unit_footer(
             bot=bot,
-            unit=unit,
+            unit=footer_unit,
             chat_id=to_channel.chat_id,
-            message_id=created_id,
+            message_id=footer_target_message_id,
             footer=footer,
         )
 
     await repo.update_loop_index(loop_id, len(route) - 1, status="done")
-
-
+    
 async def continue_loop_from_event(
     bot: Bot,
     repo: Repository,

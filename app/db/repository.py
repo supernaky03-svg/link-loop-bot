@@ -367,6 +367,24 @@ class Repository:
             .limit(1)
         )
         return result.scalar_one_or_none()
+        
+    async def get_previous_post_units(
+        self,
+        chat_id: int,
+        before_message_id: int,
+        limit: int = 2,
+    ) -> list[PostUnit]:
+        result = await self.session.execute(
+            select(PostUnit)
+            .options(selectinload(PostUnit.items))
+            .where(
+                PostUnit.chat_id == chat_id,
+                PostUnit.last_message_id < before_message_id,
+            )
+            .order_by(PostUnit.last_message_id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().unique())
 
     async def prune_post_cache(self, chat_id: int, limit: int) -> None:
         if limit <= 0:

@@ -89,15 +89,138 @@ async def save_messages_as_post_unit(
         return None
 
 
-async def select_unit_for_pair(repo: Repository, pair_movie_rule: bool, current_unit: PostUnit) -> PostUnit | None:
+def _unit_items(unit: PostUnit) -> list:
+    return list(getattr(unit, "items", []) or [])
+
+
+def _unit_has_video(unit: PostUnit) -> bool:
+    if unit.has_video:
+        return True
+    return any(item.media_type == "video" for item in _unit_items(unit))
+
+
+def _unit_is_text_only(unit: PostUnit) -> bool:
+    items = _unit_items(unit)
+
+    if items:
+        return all(item.media_type == "text" for item in items)
+
+    return bool((unit.text or "").strip()) and not (unit.caption or "").strip()
+
+
+def _unit_is_image_or_album(unit: PostUnit) -> bool:
+    """
+    Movie preview media:
+    - album/media group
+    - single photo/image post
+
+    Video units are checked and skipped before this helper is used.
+    """
+    if unit.post_type == "album":
+        return True
+
+    return any(item.media_type == "photo" for item in _unit_items(unit))
+
+
+async def select_units_for_pair(
+    repo: Repository,
+    pair_movie_rule: bool,
+    current_unit: PostUnit,
+) -> list[PostUnit]:
+    """
+    Movie Rule behavior:
+
+    OFF:
+        loop current unit.
+
+    ON:
+        only video trigger is used.
+
+        previous video:
+            skip
+
+        previous text-only:
+            check immediate post above it.
+            if above is image/album and not video:
+                loop [above_media_post, previous_text_post]
+                footer will be added only to previous_text_post in repost_service.
+            else:
+                loop [previous_text_post]
+
+        previous image/album:
+            loop [previous_post]
+
+        consecutive videos:
+            skip
+    """
     if not pair_movie_rule:
-        return current_unit
+        return [current_unit]
+
     if not current_unit.has_video:
-        return None
-    previous = await repo.get_previous_post_unit(current_unit.chat_id, current_unit.first_message_id)
-    if not previous:
+        return []
+
+    previous_units = await repo.get_previous_post_units(
+        chat_id=current_unit.chat_id,
+        before_message_id=current_unit.first_message_id,
+        limit=2,
+    )
+
+    if not previous_units:
         logger.warning(
-            'movie rule previous post not found',
-            extra={'chat_id': current_unit.chat_id, 'message_id': current_unit.first_message_id},
+            "movie rule previous post not found",
+            extra={
+                "chat_id": current_unit.chat_id,
+                "message_id": current_unit.first_message_id,
+            },
         )
-    return previous
+        return []
+
+    previous = previous_units[0]
+
+    # Consecutive video protection:
+    # Post 3 video, Post 4 video, Post 5 video ဆိုရင် Post 4/5 trigger မှာ skip.
+    if _unit_has_video(previous):
+        logger.info(
+            "movie rule skipped because previous unit is video",
+            extra={
+                "chat_id": current_unit.chat_id,
+                "trigger_message_id": current_unit.first_message_id,
+                "previous_message_id": previous.first_message_id,
+            },
+        )
+        return []
+
+    # Previous text-only:
+    # before_previous image/album ဖြစ်မှ media + text နှစ်ခုတွဲတင်မယ်။
+    # before_previous text-only ဖြစ်ရင် previous text တစ်ခုပဲတင်မယ်။
+    if _unit_is_text_only(previous):
+        before_previous = previous_units[1] if len(previous_units) > 1 else None
+
+        if (
+            before_previous
+            and not _unit_has_video(before_previous)
+            and _unit_is_image_or_album(before_previous)
+        ):
+            return [before_previous, previous]
+
+        return [previous]
+
+    # Previous image/album ဖြစ်ရင် previous တစ်ခုပဲတင်မယ်။
+    if _unit_is_image_or_album(previous):
+        return [previous]
+
+    # Fallback for non-video document/audio/caption post.
+    return [previous]
+
+
+async def select_unit_for_pair(
+    repo: Repository,
+    pair_movie_rule: bool,
+    current_unit: PostUnit,
+) -> PostUnit | None:
+    """
+    Backward-compatible wrapper.
+    New code should use select_units_for_pair().
+    """
+    units = await select_units_for_pair(repo, pair_movie_rule, current_unit)
+    return units[-1] if units else None

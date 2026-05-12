@@ -7,7 +7,7 @@ from aiogram import Bot, Router
 from aiogram.types import Message
 
 from app.bot.services.album_service import AlbumCollector
-from app.bot.services.movie_rule_service import save_messages_as_post_unit, select_unit_for_pair
+from app.bot.services.movie_rule_service import save_messages_as_post_unit, select_units_for_pair
 from app.bot.services.repost_service import start_loop
 from app.config import get_settings
 from app.db.models import LoopEvent, PostUnit
@@ -73,15 +73,19 @@ async def process_post_unit(messages: list[Message], bot: Bot) -> None:
             for pair in pairs:
                 if pair.is_paused or not pair.is_active:
                     continue
-
+                target_units = await select_units_for_pair(repo,pair.movie_rule, unit)
+                if not target_units:
+                    continue
                 if not await repo.mark_processed(pair.id, unit.chat_id, unit.first_message_id):
                     continue
-
-                target_unit = await select_unit_for_pair(repo, pair.movie_rule, unit)
-                if not target_unit:
-                    continue
-
-                await start_loop(bot, repo, pair, target_unit, source_chat_id=unit.chat_id)
+                    
+                await start_loop(
+                    bot=bot,
+                    repo=repo,
+                    pair=pair,
+                    units=target_units,
+                    source_chat_id=unit.chat_id,
+                )
     except Exception:
         logger.exception(
             "channel post processing failed",
