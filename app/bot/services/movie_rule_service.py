@@ -93,6 +93,17 @@ def _unit_items(unit: PostUnit) -> list:
     return list(getattr(unit, "items", []) or [])
 
 
+def _has_text(value: str | None) -> bool:
+    return bool((value or "").strip())
+
+
+def _unit_has_any_text(unit: PostUnit) -> bool:
+    if _has_text(unit.text) or _has_text(unit.caption):
+        return True
+
+    return any(_has_text(item.text) or _has_text(item.caption) for item in _unit_items(unit))
+
+
 def _unit_has_video(unit: PostUnit) -> bool:
     if unit.has_video:
         return True
@@ -105,7 +116,7 @@ def _unit_is_text_only(unit: PostUnit) -> bool:
     if items:
         return all(item.media_type == "text" for item in items)
 
-    return bool((unit.text or "").strip()) and not (unit.caption or "").strip()
+    return _has_text(unit.text) and not _has_text(unit.caption)
 
 
 def _unit_is_image_or_album(unit: PostUnit) -> bool:
@@ -122,6 +133,14 @@ def _unit_is_image_or_album(unit: PostUnit) -> bool:
     return any(item.media_type == "photo" for item in _unit_items(unit))
 
 
+def _unit_is_text_photo_or_album(unit: PostUnit) -> bool:
+    """Return True for the wanted movie-preview post: text/caption + photo/album."""
+    return _unit_is_image_or_album(unit) and _unit_has_any_text(unit)
+
+
+MOVIE_RULE_LOOKBACK_LIMIT = 30
+
+
 async def select_units_for_pair(
     repo: Repository,
     pair_movie_rule: bool,
@@ -136,33 +155,25 @@ async def select_units_for_pair(
     ON:
         only video trigger is used.
 
-        previous video:
-            skip
+        The video itself is never looped. Starting from the post immediately
+        above the video, search backwards until a text+photo/album preview post
+        is found, then loop only that preview post.
 
-        previous text-only:
-            check immediate post above it.
-            if above is image/album and not video:
-                loop [above_media_post, previous_text_post]
-                footer will be added only to previous_text_post in repost_service.
-            else:
-                loop [previous_text_post]
-
-        previous image/album:
-            loop [previous_post]
-
-        consecutive videos:
-            skip
+        skipped while searching:
+        - video posts
+        - text-only posts
+        - unsupported/non-preview units
     """
     if not pair_movie_rule:
         return [current_unit]
 
-    if not current_unit.has_video:
+    if not _unit_has_video(current_unit):
         return []
 
     previous_units = await repo.get_previous_post_units(
         chat_id=current_unit.chat_id,
         before_message_id=current_unit.first_message_id,
-        limit=2,
+        limit=MOVIE_RULE_LOOKBACK_LIMIT,
     )
 
     if not previous_units:
@@ -175,42 +186,59 @@ async def select_units_for_pair(
         )
         return []
 
-    previous = previous_units[0]
+    for previous in previous_units:
+        if _unit_has_video(previous):
+            logger.info(
+                "movie rule skipped previous video while searching preview",
+                extra={
+                    "chat_id": current_unit.chat_id,
+                    "trigger_message_id": current_unit.first_message_id,
+                    "skipped_message_id": previous.first_message_id,
+                },
+            )
+            continue
 
-    # Consecutive video protection:
-    # Post 3 video, Post 4 video, Post 5 video ဆိုရင် Post 4/5 trigger မှာ skip.
-    if _unit_has_video(previous):
+        if _unit_is_text_only(previous):
+            logger.info(
+                "movie rule skipped previous text-only while searching preview",
+                extra={
+                    "chat_id": current_unit.chat_id,
+                    "trigger_message_id": current_unit.first_message_id,
+                    "skipped_message_id": previous.first_message_id,
+                },
+            )
+            continue
+
+        if _unit_is_text_photo_or_album(previous):
+            logger.info(
+                "movie rule selected text+photo/album preview",
+                extra={
+                    "chat_id": current_unit.chat_id,
+                    "trigger_message_id": current_unit.first_message_id,
+                    "selected_message_id": previous.first_message_id,
+                },
+            )
+            return [previous]
+
         logger.info(
-            "movie rule skipped because previous unit is video",
+            "movie rule skipped non-preview previous unit",
             extra={
                 "chat_id": current_unit.chat_id,
                 "trigger_message_id": current_unit.first_message_id,
-                "previous_message_id": previous.first_message_id,
+                "skipped_message_id": previous.first_message_id,
+                "post_type": previous.post_type,
             },
         )
-        return []
 
-    # Previous text-only:
-    # before_previous image/album ဖြစ်မှ media + text နှစ်ခုတွဲတင်မယ်။
-    # before_previous text-only ဖြစ်ရင် previous text တစ်ခုပဲတင်မယ်။
-    if _unit_is_text_only(previous):
-        before_previous = previous_units[1] if len(previous_units) > 1 else None
-
-        if (
-            before_previous
-            and not _unit_has_video(before_previous)
-            and _unit_is_image_or_album(before_previous)
-        ):
-            return [before_previous, previous]
-
-        return [previous]
-
-    # Previous image/album ဖြစ်ရင် previous တစ်ခုပဲတင်မယ်။
-    if _unit_is_image_or_album(previous):
-        return [previous]
-
-    # Fallback for non-video document/audio/caption post.
-    return [previous]
+    logger.warning(
+        "movie rule text+photo/album preview not found in lookback window",
+        extra={
+            "chat_id": current_unit.chat_id,
+            "trigger_message_id": current_unit.first_message_id,
+            "lookback_limit": MOVIE_RULE_LOOKBACK_LIMIT,
+        },
+    )
+    return []
 
 
 async def select_unit_for_pair(

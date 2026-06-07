@@ -63,9 +63,9 @@ class Pair(Base, TimestampMixin):
     is_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     paused_reason: Mapped[str | None] = mapped_column(Text)
 
-    user: Mapped[User] = relationship(back_populates='pairs')
+    user: Mapped[User] = relationship(back_populates='pairs', lazy='selectin')
     channels: Mapped[list['PairChannel']] = relationship(
-        back_populates='pair', cascade='all, delete-orphan', order_by='PairChannel.order_no'
+        back_populates='pair', cascade='all, delete-orphan', order_by='PairChannel.order_no', lazy='selectin'
     )
 
 
@@ -85,7 +85,7 @@ class PairChannel(Base, TimestampMixin):
     bot_admin_ok: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_admin_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    pair: Mapped[Pair] = relationship(back_populates='channels')
+    pair: Mapped[Pair] = relationship(back_populates='channels', lazy='selectin')
 
 
 class PostUnit(Base):
@@ -104,7 +104,7 @@ class PostUnit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     items: Mapped[list['PostItem']] = relationship(
-        back_populates='post_unit', cascade='all, delete-orphan', order_by='PostItem.item_order'
+        back_populates='post_unit', cascade='all, delete-orphan', order_by='PostItem.item_order', lazy='selectin'
     )
 
 
@@ -121,7 +121,7 @@ class PostItem(Base):
     text: Mapped[str | None] = mapped_column(Text)
     item_order: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    post_unit: Mapped[PostUnit] = relationship(back_populates='items')
+    post_unit: Mapped[PostUnit] = relationship(back_populates='items', lazy='selectin')
 
 
 class LoopState(Base):

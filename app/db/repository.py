@@ -321,7 +321,7 @@ class Repository:
         result = await self.session.execute(select(PostUnit).where(PostUnit.unit_key == unit_key))
         existing = result.scalar_one_or_none()
         if existing:
-            return existing
+            return await self.get_post_unit(existing.id)  # type: ignore[return-value]
 
         unit = PostUnit(
             chat_id=chat_id,
