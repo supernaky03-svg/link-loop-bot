@@ -20,10 +20,12 @@ class AlbumBucket:
 
 
 class AlbumCollector:
-    """In-memory album collector for one-process polling deployments."""
+    """Collect an incoming Telegram media group by inactivity, not first-message timing."""
+
+    MAX_ALBUM_ITEMS = 10
 
     def __init__(self, delay_seconds: float):
-        self.delay_seconds = delay_seconds
+        self.delay_seconds = max(0.1, float(delay_seconds))
         self._buckets: dict[tuple[int, str], AlbumBucket] = defaultdict(AlbumBucket)
         self._lock = asyncio.Lock()
 
@@ -31,21 +33,46 @@ class AlbumCollector:
         if not message.media_group_id:
             await callback([message])
             return
+
         key = (message.chat.id, message.media_group_id)
+        flush_now = False
         async with self._lock:
             bucket = self._buckets[key]
-            bucket.messages.append(message)
-            if not bucket.task:
+            if all(existing.message_id != message.message_id for existing in bucket.messages):
+                bucket.messages.append(message)
+
+            # Telegram media groups are capped at 10. Once all 10 arrive we do not
+            # need to wait for the inactivity timer.
+            if len(bucket.messages) >= self.MAX_ALBUM_ITEMS:
+                flush_now = True
+                old_task = bucket.task
+                bucket.task = None
+                if old_task and not old_task.done():
+                    old_task.cancel()
+            else:
+                old_task = bucket.task
+                if old_task and not old_task.done():
+                    old_task.cancel()
                 bucket.task = asyncio.create_task(self._flush_after_delay(key, callback))
 
+        if flush_now:
+            await self._flush(key, callback)
+
     async def _flush_after_delay(self, key: tuple[int, str], callback: AlbumCallback) -> None:
-        await asyncio.sleep(self.delay_seconds)
+        try:
+            await asyncio.sleep(self.delay_seconds)
+            await self._flush(key, callback)
+        except asyncio.CancelledError:
+            raise
+
+    async def _flush(self, key: tuple[int, str], callback: AlbumCallback) -> None:
         async with self._lock:
             bucket = self._buckets.pop(key, None)
-        if not bucket:
+        if not bucket or not bucket.messages:
             return
+
         messages = sorted(bucket.messages, key=lambda msg: msg.message_id)
         try:
             await callback(messages)
         except Exception:
-            logger.exception('album callback failed', extra={'chat_id': key[0], 'media_group_id': key[1]})
+            logger.exception("album callback failed", extra={"chat_id": key[0], "media_group_id": key[1]})

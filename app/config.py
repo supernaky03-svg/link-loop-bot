@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import FrozenSet
 
+from dotenv import load_dotenv
+
+# Local development uses .env; hosted environments can still provide real env vars.
+load_dotenv()
+
 
 def _csv_ints(value: str | None) -> FrozenSet[int]:
     if not value:
@@ -47,7 +52,6 @@ class Settings:
     admin_ids: FrozenSet[int]
     report_group_id: int
     database_url: str
-
     default_pair_limit: int = 10
     default_channel_per_pair_limit: int = 6
     default_language: str = 'en'
@@ -60,17 +64,15 @@ class Settings:
     album_collect_delay_seconds: float = 2.0
     banned_silent: bool = True
     admin_contact: str = '@mnsm6003'
+    mini_app_url: str = ''
 
     @property
     def sqlalchemy_url(self) -> str:
-        """Return an async SQLAlchemy URL that works with Neon/PostgreSQL."""
         url = self.database_url.strip()
         if url.startswith('postgres://'):
             url = 'postgresql://' + url.removeprefix('postgres://')
         if url.startswith('postgresql://'):
             url = url.replace('postgresql://', 'postgresql+asyncpg://', 1)
-        # asyncpg does not accept sslmode=require in the query string.
-        # app/db/session.py converts sslmode=require to connect_args={"ssl": "require"}.
         return url
 
 
@@ -86,7 +88,6 @@ def get_settings() -> Settings:
     default_language = os.getenv('DEFAULT_LANGUAGE', 'en').strip().lower()
     if default_language not in {'en', 'my'}:
         default_language = 'en'
-
     return Settings(
         bot_token=bot_token,
         admin_ids=_csv_ints(os.getenv('ADMIN_IDS')),
@@ -104,4 +105,5 @@ def get_settings() -> Settings:
         album_collect_delay_seconds=_float_env('ALBUM_COLLECT_DELAY_SECONDS', 2.0),
         banned_silent=os.getenv('BANNED_SILENT', 'true').lower() in {'1', 'true', 'yes', 'on'},
         admin_contact=os.getenv('ADMIN_CONTACT', '@mnsm6003'),
+        mini_app_url=os.getenv('MINI_APP_URL', '').strip(),
     )

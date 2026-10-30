@@ -7,6 +7,7 @@ from contextlib import suppress
 
 from app.bot.handlers import register_handlers
 from app.bot.loader import create_bot, create_dispatcher
+from app.bot.services.repost_service import resume_pending_loops
 from app.config import get_settings
 from app.db.session import close_db, init_db
 from app.health import start_health_server
@@ -24,8 +25,8 @@ async def main() -> None:
     bot = create_bot(settings)
     dp = create_dispatcher(settings)
     register_handlers(dp)
-    health_runner = await start_health_server(settings)
-
+    health_runner = await start_health_server(settings, bot)
+    recovery_task = asyncio.create_task(resume_pending_loops(bot))
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -34,12 +35,14 @@ async def main() -> None:
 
     polling_task = asyncio.create_task(dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types()))
     logger.info('Bot started. Health endpoint: %s:%s%s', settings.health_host, settings.port, settings.health_path)
-
     await stop_event.wait()
     logger.info('Stopping bot...')
     polling_task.cancel()
+    recovery_task.cancel()
     with suppress(asyncio.CancelledError):
         await polling_task
+    with suppress(asyncio.CancelledError):
+        await recovery_task
     await health_runner.cleanup()
     await bot.session.close()
     await close_db()

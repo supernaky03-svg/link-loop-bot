@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.db.models import PairChannel
@@ -32,14 +32,10 @@ class ParsedChannelInput:
     @classmethod
     def from_dict(cls, data: dict) -> 'ParsedChannelInput':
         return cls(
-            raw=str(data.get('raw') or ''),
-            order_no=int(data.get('order_no') or 1),
+            raw=str(data.get('raw') or ''), order_no=int(data.get('order_no') or 1),
             chat_id=int(data['chat_id']) if data.get('chat_id') is not None else None,
-            username=data.get('username'),
-            public_link=data.get('public_link'),
-            invite_link=data.get('invite_link'),
-            missing=data.get('missing'),
-            error=data.get('error'),
+            username=data.get('username'), public_link=data.get('public_link'),
+            invite_link=data.get('invite_link'), missing=data.get('missing'), error=data.get('error'),
         )
 
     @property
@@ -56,7 +52,6 @@ def _clean(value: str) -> str:
 
 
 def is_private_invite_link(value: str) -> bool:
-    """Return True for t.me/+hash or t.me/joinchat/hash links."""
     return bool(_INVITE_LINK_RE.match(_clean(value)))
 
 
@@ -89,9 +84,7 @@ def username_from_value(value: str) -> str | None:
     if value.startswith('@') and len(value) >= 6:
         return value[1:]
     match = _USERNAME_RE.match(value)
-    if match:
-        return match.group(1)
-    return None
+    return match.group(1) if match else None
 
 
 def normalize_channel_input(value: str) -> str:
@@ -120,11 +113,7 @@ def _classify(value: str) -> dict:
         return {'kind': 'chat_id', 'chat_id': chat_id}
     username = username_from_value(value)
     if username:
-        return {
-            'kind': 'public',
-            'username': username,
-            'public_link': public_channel_link(username, None),
-        }
+        return {'kind': 'public', 'username': username, 'public_link': public_channel_link(username, None)}
     return {'kind': 'invalid', 'value': value}
 
 
@@ -144,35 +133,17 @@ def parse_channel_input_token(token: str, order_no: int) -> ParsedChannelInput:
     pieces = [piece for piece in _split_paired_token(raw) if piece]
     if len(pieces) > 2:
         return ParsedChannelInput(raw=raw, order_no=order_no, error='invalid_channel_input')
-
     parsed = [_classify(piece) for piece in pieces]
     if any(part['kind'] == 'invalid' for part in parsed):
         return ParsedChannelInput(raw=raw, order_no=order_no, error='invalid_channel_input')
-
     if len(parsed) == 1:
         part = parsed[0]
         if part['kind'] == 'public':
-            return ParsedChannelInput(
-                raw=raw,
-                order_no=order_no,
-                username=part['username'],
-                public_link=part['public_link'],
-            )
+            return ParsedChannelInput(raw=raw, order_no=order_no, username=part['username'], public_link=part['public_link'])
         if part['kind'] == 'invite':
-            return ParsedChannelInput(
-                raw=raw,
-                order_no=order_no,
-                invite_link=part['invite_link'],
-                missing='chat_id',
-            )
+            return ParsedChannelInput(raw=raw, order_no=order_no, invite_link=part['invite_link'], missing='chat_id')
         if part['kind'] == 'chat_id':
-            return ParsedChannelInput(
-                raw=raw,
-                order_no=order_no,
-                chat_id=part['chat_id'],
-                missing='invite_link',
-            )
-
+            return ParsedChannelInput(raw=raw, order_no=order_no, chat_id=part['chat_id'], missing='invite_link')
     invite_link: str | None = None
     chat_id: int | None = None
     username: str | None = None
@@ -183,9 +154,7 @@ def parse_channel_input_token(token: str, order_no: int) -> ParsedChannelInput:
         elif part['kind'] == 'chat_id':
             chat_id = part['chat_id']
         elif part['kind'] == 'public':
-            username = part['username']
-            public_link = part['public_link']
-
+            username = part['username']; public_link = part['public_link']
     if username and not invite_link and chat_id is None:
         return ParsedChannelInput(raw=raw, order_no=order_no, username=username, public_link=public_link)
     if invite_link and chat_id is not None and not username:
@@ -226,11 +195,72 @@ def channel_link_from_pair_channel(channel: 'PairChannel') -> str:
     return channel.channel_link or public_channel_link(channel.username, channel.chat_id) or str(channel.chat_id)
 
 
-def strip_visible_links(text: str | None) -> str | None:
+def _entity_range_to_py(text: str, offset: int, length: int) -> tuple[int, int]:
+    prefix = [0]
+    total = 0
+    for ch in text:
+        total += len(ch.encode('utf-16-le')) // 2
+        prefix.append(total)
+    target_start = offset
+    target_end = offset + length
+    start = next((i for i, value in enumerate(prefix) if value >= target_start), len(text))
+    if prefix[start] != target_start:
+        start -= 1
+    end = next((i for i, value in enumerate(prefix) if value >= target_end), len(text))
+    return max(0, start), max(start, end)
+
+
+def strip_visible_links_with_entities(text: str | None, entities: list[dict] | None) -> tuple[str | None, list[dict] | None]:
     if not text:
-        return text
-    cleaned = _VISIBLE_LINK_RE.sub('', text)
-    cleaned = re.sub(r'[ \t]+\n', '\n', cleaned)
-    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-    cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
-    return cleaned.strip() or None
+        return text, entities
+    normalized_entities = [dict(e) for e in (entities or [])]
+    hidden_entity_ranges: list[tuple[int, int]] = []
+    for entity in normalized_entities:
+        entity_type = entity.get('type')
+        if entity_type in {'text_link', 'text_mention'}:
+            hidden_entity_ranges.append(_entity_range_to_py(text, int(entity.get('offset', 0)), int(entity.get('length', 0))))
+
+    removals: list[tuple[int, int]] = []
+    for match in _VISIBLE_LINK_RE.finditer(text):
+        span = match.span()
+        if any(start <= span[0] and span[1] <= end for start, end in hidden_entity_ranges):
+            continue
+        removals.append(span)
+
+    if not removals:
+        return text, normalized_entities or None
+
+    def removed_at(index: int) -> bool:
+        return any(start <= index < end for start, end in removals)
+
+    kept_chars: list[str] = []
+    new_utf16_prefix = [0]
+    for index, ch in enumerate(text):
+        if removed_at(index):
+            new_utf16_prefix.append(new_utf16_prefix[-1])
+            continue
+        kept_chars.append(ch)
+        new_utf16_prefix.append(new_utf16_prefix[-1] + len(ch.encode('utf-16-le')) // 2)
+
+    cleaned = ''.join(kept_chars) or None
+    if cleaned is None:
+        return None, None
+
+    adjusted: list[dict] = []
+    for entity in normalized_entities:
+        start, end = _entity_range_to_py(text, int(entity.get('offset', 0)), int(entity.get('length', 0)))
+        while start < end and removed_at(start):
+            start += 1
+        while end > start and removed_at(end - 1):
+            end -= 1
+        if end <= start:
+            continue
+        item = dict(entity)
+        item['offset'] = new_utf16_prefix[start]
+        item['length'] = new_utf16_prefix[end] - new_utf16_prefix[start]
+        adjusted.append(item)
+    return cleaned, adjusted or None
+
+
+def strip_visible_links(text: str | None) -> str | None:
+    return strip_visible_links_with_entities(text, None)[0]

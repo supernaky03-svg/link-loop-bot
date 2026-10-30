@@ -167,4 +167,5 @@ BUTTONS: dict[str, str] = {
     'language': '🌐 ဘာသာစကား',
     'contact_admin': '☎️ Admin ဆက်သွယ်ရန်',
     'help': '❓ အကူအညီ',
+    'web_app': '📱 Mini App ဖွင့်မယ်',
 }

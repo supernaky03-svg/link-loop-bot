@@ -10,7 +10,6 @@ from app.db.base import Base
 
 
 def _prepare_url_and_connect_args(url: str) -> tuple[str, dict]:
-    """Move sslmode=require from URL query to asyncpg connect_args."""
     split = urlsplit(url)
     query = dict(parse_qsl(split.query, keep_blank_values=True))
     connect_args: dict = {}
@@ -40,6 +39,32 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text('ALTER TABLE IF EXISTS pair_channels ADD COLUMN IF NOT EXISTS invite_link TEXT'))
+        # Existing deployments need additive columns and the old loop-step constraint replaced.
+        await conn.execute(text('ALTER TABLE IF EXISTS post_items ADD COLUMN IF NOT EXISTS entities JSONB'))
+        await conn.execute(text('ALTER TABLE IF EXISTS post_items ADD COLUMN IF NOT EXISTS caption_entities JSONB'))
+        await conn.execute(text('ALTER TABLE IF EXISTS post_items ADD COLUMN IF NOT EXISTS reply_markup JSONB'))
+        await conn.execute(text('ALTER TABLE IF EXISTS loop_states ADD COLUMN IF NOT EXISTS selected_unit_ids JSONB'))
+        await conn.execute(text('ALTER TABLE IF EXISTS loop_states ADD COLUMN IF NOT EXISTS created_message_ids JSONB'))
+        await conn.execute(text('ALTER TABLE IF EXISTS loop_states ADD COLUMN IF NOT EXISTS footer_message_ids JSONB'))
+        await conn.execute(text('ALTER TABLE IF EXISTS loop_states ADD COLUMN IF NOT EXISTS footer_ready_at TIMESTAMPTZ'))
+        await conn.execute(text('ALTER TABLE IF EXISTS loop_events DROP CONSTRAINT IF EXISTS uq_loop_step'))
+        await conn.execute(text('ALTER TABLE IF EXISTS loop_events DROP CONSTRAINT IF EXISTS uq_loop_step_v2'))
+        await conn.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_loop_step_v2_idx '
+            'ON loop_events(loop_id, from_chat_id, from_message_id, to_chat_id, to_message_id)'
+        ))
+        await conn.execute(text(
+            'DELETE FROM loop_states old USING loop_states newer '
+            'WHERE old.id < newer.id '
+            'AND old.pair_id = newer.pair_id '
+            'AND old.origin_chat_id = newer.origin_chat_id '
+            'AND old.origin_message_id = newer.origin_message_id'
+        ))
+        await conn.execute(text('ALTER TABLE IF EXISTS loop_states DROP CONSTRAINT IF EXISTS uq_loop_origin'))
+        await conn.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_loop_origin_idx '
+            'ON loop_states(pair_id, origin_chat_id, origin_message_id)'
+        ))
 
 
 async def close_db() -> None:

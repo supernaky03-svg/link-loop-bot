@@ -167,4 +167,5 @@ BUTTONS: dict[str, str] = {
     'language': '🌐 Language',
     'contact_admin': '☎️ Contact Admin',
     'help': '❓ Help',
+    'web_app': '📱 Open Mini App',
 }

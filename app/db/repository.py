@@ -62,18 +62,12 @@ class Repository:
 
     async def get_user_by_username(self, username: str) -> User | None:
         normalized = username.lstrip('@').lower()
-        result = await self.session.execute(
-            select(User).where(func.lower(User.username) == normalized)
-        )
+        result = await self.session.execute(select(User).where(func.lower(User.username) == normalized))
         return result.scalar_one_or_none()
 
     async def get_or_create_user(
-        self,
-        tg_user_id: int,
-        username: str | None,
-        settings: Settings,
+        self, tg_user_id: int, username: str | None, settings: Settings
     ) -> tuple[User | None, bool, bool]:
-        """Return (user, created, rejected_by_limit)."""
         user = await self.get_user_by_tg_id(tg_user_id)
         if user:
             new_username = username.lstrip('@') if username else None
@@ -81,11 +75,9 @@ class Repository:
                 user.username = new_username
                 await self.session.commit()
             return user, False, False
-
         user_limit = await self.get_int_setting('user_limit', settings.user_limit)
         if user_limit > 0 and await self.count_users() >= user_limit:
             return None, False, True
-
         user = User(
             tg_user_id=tg_user_id,
             username=username.lstrip('@') if username else None,
@@ -139,41 +131,26 @@ class Repository:
         result = await self.session.execute(stmt)
         return list(result.scalars().unique())
 
-    async def get_pair_by_no(
-        self,
-        user_id: int,
-        pair_no: int,
-        active_only: bool = True,
-    ) -> Pair | None:
+    async def get_pair_by_no(self, user_id: int, pair_no: int, active_only: bool = True) -> Pair | None:
         stmt = (
             select(Pair)
             .options(selectinload(Pair.channels), selectinload(Pair.user))
             .where(Pair.user_id == user_id, Pair.pair_no == pair_no)
         )
-        
         if active_only:
             stmt = stmt.where(Pair.is_active.is_(True))
-            
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_pair(self, pair_id: int) -> Pair | None:
         result = await self.session.execute(
-            select(Pair)
-            .options(selectinload(Pair.channels), selectinload(Pair.user))
-            .where(Pair.id == pair_id)
+            select(Pair).options(selectinload(Pair.channels), selectinload(Pair.user)).where(Pair.id == pair_id)
         )
         return result.scalar_one_or_none()
 
     async def get_next_pair_no(self, user_id: int) -> int:
-        numbers = await self.session.scalars(
-            select(Pair.pair_no).where(
-                Pair.user_id == user_id,
-                Pair.is_active.is_(True),
-            )
-        )
+        numbers = await self.session.scalars(select(Pair.pair_no).where(Pair.user_id == user_id, Pair.is_active.is_(True)))
         used = set(numbers.all())
-        
         n = 1
         while n in used:
             n += 1
@@ -181,9 +158,7 @@ class Repository:
 
     async def count_active_pairs(self, user_id: int) -> int:
         return int(
-            await self.session.scalar(
-                select(func.count(Pair.id)).where(Pair.user_id == user_id, Pair.is_active.is_(True))
-            )
+            await self.session.scalar(select(func.count(Pair.id)).where(Pair.user_id == user_id, Pair.is_active.is_(True)))
             or 0
         )
 
@@ -195,15 +170,9 @@ class Repository:
         movie_rule: bool,
         channels: Sequence[dict],
     ) -> Pair:
-        existing = await self.get_pair_by_no(
-            user_id=user_id,
-            pair_no=pair_no,
-            active_only=False,
-        )
-        
+        existing = await self.get_pair_by_no(user_id=user_id, pair_no=pair_no, active_only=False)
         if existing and existing.is_active:
             raise ValueError(f'Active pair {pair_no} already exists for user {user_id}')
-            
         if existing:
             pair = existing
             pair.repost_style = repost_style
@@ -224,7 +193,6 @@ class Repository:
             )
             self.session.add(pair)
             await self.session.flush()
-            
         for idx, ch in enumerate(channels, start=1):
             pair.channels.append(
                 PairChannel(
@@ -236,7 +204,7 @@ class Repository:
                     invite_link=ch.get('invite_link'),
                     order_no=int(ch.get('order_no') or idx),
                     bot_admin_ok=True,
-                    last_admin_check_at=datetime.now(timezone.utc) 
+                    last_admin_check_at=datetime.now(timezone.utc),
                 )
             )
         await self.session.commit()
@@ -270,11 +238,7 @@ class Repository:
             select(Pair)
             .join(PairChannel)
             .options(selectinload(Pair.channels), selectinload(Pair.user))
-            .where(
-                PairChannel.chat_id == chat_id,
-                PairChannel.is_active.is_(True),
-                Pair.is_active.is_(True),
-            )
+            .where(PairChannel.chat_id == chat_id, PairChannel.is_active.is_(True), Pair.is_active.is_(True))
         )
         return list(result.scalars().unique())
 
@@ -322,7 +286,6 @@ class Repository:
         existing = result.scalar_one_or_none()
         if existing:
             return await self.get_post_unit(existing.id)  # type: ignore[return-value]
-
         unit = PostUnit(
             chat_id=chat_id,
             unit_key=unit_key,
@@ -345,16 +308,42 @@ class Repository:
                     file_id=item.get('file_id'),
                     caption=item.get('caption'),
                     text=item.get('text'),
+                    entities=item.get('entities'),
+                    caption_entities=item.get('caption_entities'),
+                    reply_markup=item.get('reply_markup'),
                     item_order=idx,
                 )
             )
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            existing = await self.session.execute(select(PostUnit).where(PostUnit.unit_key == unit_key))
+            winner = existing.scalar_one_or_none()
+            if winner:
+                return await self.get_post_unit(winner.id)  # type: ignore[return-value]
+            raise
         await self.prune_post_cache(chat_id, cache_limit)
         return await self.get_post_unit(unit.id)  # type: ignore[return-value]
 
     async def get_post_unit(self, post_unit_id: int) -> PostUnit | None:
+        result = await self.session.execute(select(PostUnit).options(selectinload(PostUnit.items)).where(PostUnit.id == post_unit_id))
+        return result.scalar_one_or_none()
+
+    async def get_post_units_by_ids(self, post_unit_ids: Sequence[int]) -> list[PostUnit]:
+        if not post_unit_ids:
+            return []
         result = await self.session.execute(
-            select(PostUnit).options(selectinload(PostUnit.items)).where(PostUnit.id == post_unit_id)
+            select(PostUnit).options(selectinload(PostUnit.items)).where(PostUnit.id.in_(list(post_unit_ids)))
+        )
+        units = {unit.id: unit for unit in result.scalars().unique()}
+        return [units[unit_id] for unit_id in post_unit_ids if unit_id in units]
+
+    async def get_post_unit_by_first_message(self, chat_id: int, first_message_id: int) -> PostUnit | None:
+        result = await self.session.execute(
+            select(PostUnit)
+            .options(selectinload(PostUnit.items))
+            .where(PostUnit.chat_id == chat_id, PostUnit.first_message_id == first_message_id)
         )
         return result.scalar_one_or_none()
 
@@ -367,20 +356,12 @@ class Repository:
             .limit(1)
         )
         return result.scalar_one_or_none()
-        
-    async def get_previous_post_units(
-        self,
-        chat_id: int,
-        before_message_id: int,
-        limit: int = 2,
-    ) -> list[PostUnit]:
+
+    async def get_previous_post_units(self, chat_id: int, before_message_id: int, limit: int = 2) -> list[PostUnit]:
         result = await self.session.execute(
             select(PostUnit)
             .options(selectinload(PostUnit.items))
-            .where(
-                PostUnit.chat_id == chat_id,
-                PostUnit.last_message_id < before_message_id,
-            )
+            .where(PostUnit.chat_id == chat_id, PostUnit.last_message_id < before_message_id)
             .order_by(PostUnit.last_message_id.desc())
             .limit(limit)
         )
@@ -389,9 +370,16 @@ class Repository:
     async def prune_post_cache(self, chat_id: int, limit: int) -> None:
         if limit <= 0:
             return
+        protected = select(LoopState.origin_message_id).where(
+            LoopState.origin_chat_id == chat_id,
+            LoopState.status.in_(['running', 'waiting_footer', 'footer_failed']),
+        )
         sub = (
             select(PostUnit.id)
-            .where(PostUnit.chat_id == chat_id)
+            .where(
+                PostUnit.chat_id == chat_id,
+                ~PostUnit.first_message_id.in_(protected),
+            )
             .order_by(PostUnit.last_message_id.desc())
             .offset(limit)
             .subquery()
@@ -416,18 +404,38 @@ class Repository:
         origin_chat_id: int,
         origin_message_id: int,
         route_chat_ids: list[int],
-    ) -> LoopState:
+        selected_unit_ids: list[int] | None = None,
+    ) -> LoopState | None:
         state = LoopState(
             loop_id=loop_id,
             pair_id=pair_id,
             origin_chat_id=origin_chat_id,
             origin_message_id=origin_message_id,
             route_chat_ids=route_chat_ids,
+            selected_unit_ids=selected_unit_ids or [],
+            created_message_ids={},
+            footer_message_ids={},
             current_index=0,
+            status='running',
         )
         self.session.add(state)
-        await self.session.commit()
-        return state
+        try:
+            await self.session.commit()
+            return state
+        except IntegrityError:
+            await self.session.rollback()
+            existing = await self.session.execute(
+                select(LoopState).where(
+                    LoopState.pair_id == pair_id,
+                    LoopState.origin_chat_id == origin_chat_id,
+                    LoopState.origin_message_id == origin_message_id,
+                )
+            )
+            logger.info(
+                'loop already claimed for origin',
+                extra={'pair_id': pair_id, 'chat_id': origin_chat_id, 'message_id': origin_message_id},
+            )
+            return existing.scalar_one_or_none()
 
     async def get_loop_event_by_created_message(self, chat_id: int, message_id: int) -> LoopEvent | None:
         result = await self.session.execute(
@@ -439,23 +447,7 @@ class Repository:
         )
         return result.scalar_one_or_none()
 
-    async def get_loop_event_by_created_unit(
-        self,
-        chat_id: int,
-        first_message_id: int,
-        last_message_id: int,
-    ) -> LoopEvent | None:
-        """Return the loop event for a bot-created post unit.
-
-        The loop event is written immediately after Telegram returns the created
-        message id. On busy polling/webhook deployments, the channel_post update
-        for that created message can arrive before the database commit becomes
-        visible. Callers should retry this lookup briefly before treating a
-        bot-created post as a normal channel post.
-
-        Albums are saved as one post unit, so this also accepts a first/last
-        message range instead of only one exact message id.
-        """
+    async def get_loop_event_by_created_unit(self, chat_id: int, first_message_id: int, last_message_id: int) -> LoopEvent | None:
         result = await self.session.execute(
             select(LoopEvent)
             .where(
@@ -472,6 +464,12 @@ class Repository:
     async def get_loop_state(self, loop_id: str) -> LoopState | None:
         result = await self.session.execute(select(LoopState).where(LoopState.loop_id == loop_id))
         return result.scalar_one_or_none()
+
+    async def get_pending_loop_states(self) -> list[LoopState]:
+        result = await self.session.execute(
+            select(LoopState).where(LoopState.status.in_(['waiting_footer', 'running', 'failed', 'footer_failed'])).order_by(LoopState.id)
+        )
+        return list(result.scalars().unique())
 
     async def save_loop_event(
         self,
@@ -503,23 +501,36 @@ class Repository:
             await self.session.commit()
         except IntegrityError:
             await self.session.rollback()
-            logger.info('duplicate loop event ignored', extra={'loop_id': loop_id, 'pair_id': pair_id})
+            # Duplicate exact destination message is idempotent; do not hide other failures.
+            existing = await self.get_loop_event_by_created_message(to_chat_id, to_message_id)
+            if not existing:
+                raise
 
-    async def update_loop_index(
+    async def update_loop_delivery(
         self,
         loop_id: str,
         current_index: int,
-        status: str = "running",
+        status: str,
+        created_message_ids: dict | None = None,
+        footer_message_ids: dict | None = None,
+        footer_ready_at: datetime | None = None,
     ) -> None:
-        """
-        Keep loop progress monotonic.
-        
-        Race case:
-        A->B sender may update index to 1 after B->C continuation already
-        updated it to 2. We must not move current_index backward.
-        Also, once status is done, do not revert it back to running.
-        """
-        
+        values: dict = {
+            'current_index': current_index,
+            'status': status,
+        }
+        if created_message_ids is not None:
+            values['created_message_ids'] = created_message_ids
+        if footer_message_ids is not None:
+            values['footer_message_ids'] = footer_message_ids
+        if footer_ready_at is not None:
+            values['footer_ready_at'] = footer_ready_at
+        await self.session.execute(
+            update(LoopState).where(LoopState.loop_id == loop_id).values(**values)
+        )
+        await self.session.commit()
+
+    async def update_loop_index(self, loop_id: str, current_index: int, status: str = 'running') -> None:
         await self.session.execute(
             update(LoopState)
             .where(LoopState.loop_id == loop_id)
@@ -529,7 +540,7 @@ class Repository:
                     else_=LoopState.current_index,
                 ),
                 status=case(
-                    (LoopState.status == "done", LoopState.status),
+                    (LoopState.status == 'done', LoopState.status),
                     else_=status,
                 ),
             )
