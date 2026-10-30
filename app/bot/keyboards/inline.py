@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-from app.bot.services.language_service import t
+from app.bot.services.language_service import b, t
 
 
 def flow_nav(language: str, *, back: bool = True, cancel: bool = True) -> list[list[InlineKeyboardButton]]:
@@ -86,3 +86,15 @@ def pair_select_keyboard(language: str, pair_numbers: list[int], prefix: str) ->
         rows.append(row)
     rows += flow_nav(language, back=False)
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+
+def mini_app_launch_keyboard(language: str, url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=b(language, 'web_app'),
+                web_app=WebAppInfo(url=url),
+            )
+        ]]
+    )

@@ -1,33 +1,56 @@
-# Link Loop Bot — Reliability fix + Telegram Mini App overlay
+# Link Loop Bot — repost fixes + Mini App + Pair creation hotfix
 
-This ZIP is an integration overlay for the public repository `supernaky03-svg/link-loop-bot`; it is not a standalone full-source export. Clone the public repository first. The current `main` already contains `link-loop-bot-fixed/`, a separate repost-engine hotfix overlay. `apply_link_loop_all_fixes.py` applies that overlay and then integrates this Mini App.
+This is an **integration overlay** for the public repository `supernaky03-svg/link-loop-bot`, not a standalone export of every upstream repository file. Clone the repository first, then extract this ZIP into the repository root.
 
-## Included changes
+## Included work
 
-- The existing repost-engine hotfix overlay: duplicate-origin protection, safer fan-out failure handling, post-cache/origin safeguards, album collector fixes, loop/footer recovery, message entity/inline-keyboard preservation and idempotency safeguards.
-- Explicit SQLAlchemy `selectin` loading on `User.pairs`, targeting the `MissingGreenlet` lazy-load failure.
-- Telegram Mini App served by the existing aiohttp service and existing Render port.
-- Telegram `initData` HMAC signature and auth-date verification on every API request.
-- User-scoped APIs: list/create/update/remove pairs, Random/By Order, Movie Rule, channel permission recheck, language and contact/help.
-- Admin APIs: dashboard, ban/unban, per-user limits, default limits, user limit and status report.
-- Bot keyboard launch button, enabled only when `MINI_APP_URL` is set to a public HTTPS URL.
+- Existing `link-loop-bot-fixed/` upstream repost-engine fixes (copied by the apply script). The upstream overlay contains an empty `app/bot/handlers/__init__.py`; this ZIP explicitly restores `register_handlers()` so the previous Render import error is not reintroduced.
+- Telegram Mini App backend/UI, signed Telegram `initData` validation, user-scoped pair APIs, and admin functions.
+- SQLAlchemy async eager-loading change for `User.pairs`.
+- **Confirmed Pair 5 / MissingGreenlet fix:** new `Pair` objects are constructed with `channels=[]` before `flush()`. This initializes the ORM collection so `pair.channels.append(...)` cannot trigger an implicit lazy-load outside SQLAlchemy's async greenlet context.
+- Failed Pair confirmation performs an AsyncSession rollback and leaves the confirmation keyboard available for a retry instead of leaving a failed transaction open.
+- **Mini App launch UX:** Reply Keyboard button is plain text. Tapping it makes the bot send a second message with an Inline Keyboard `web_app` button; that Inline button launches the Mini App.
+- Focused tests for Mini App authentication, `User.pairs` eager-loading and new `Pair.channels` initialization.
 
-The Mini App uses the same PostgreSQL tables and repository/services as the bot. It does not run a second repost engine; channel posts continue to be processed by the bot.
+## Apply to existing Termux clone
 
-## Apply
-
-Extract this ZIP at the root of a clean clone of the public repository and run:
+1. Keep your existing clone and branch; do not delete the database or existing pairs.
+2. Extract the ZIP into the root of `~/link-loop-bot` (merge/overwrite when prompted).
+3. Run:
 
 ```bash
 python apply_link_loop_all_fixes.py
+python -m compileall -q app tests
+python -m pytest -q tests/test_mini_app_auth.py
 ```
 
-See `TERMUX_COMMIT.md` for Termux clone, apply, test, commit and push commands.
+The full suite should be run in the Render build environment or a compatible Linux/Python environment with all `requirements.txt` dependencies installed. Termux Android may not have compatible prebuilt wheels for `pydantic-core` or `asyncpg`; do not upgrade Termux's system pip with `python -m pip install --upgrade pip`.
 
-## Safety
+## Mini App URL
 
-- ZIP does not contain the upstream base repository; clone `main` first.
-- Before first deployment, back up Neon/PostgreSQL. The existing `link-loop-bot-fixed` overlay includes additive schema migrations and duplicate loop-origin cleanup.
-- Configure `MINI_APP_URL=https://YOUR-RENDER-SERVICE.onrender.com/app` in Render.
-- Never commit `.env`, `BOT_TOKEN`, `DATABASE_URL`, GitHub tokens or Render secrets.
-- Production success requires the full test suite plus live Telegram/PostgreSQL testing; a local syntax/auth test is not proof of a live deployment.
+Set Render environment variable to the actual service URL:
+
+```text
+MINI_APP_URL=https://link-loop-bot.onrender.com/app
+```
+
+Keep `BOT_TOKEN`, `DATABASE_URL`, `ADMIN_IDS`, `python -m app.main`, and `/healthz` as before. Do not commit secrets.
+
+## Pair creation verification
+
+After deploying, add one Pair using two test channels where the bot has admin + Post Messages permission. Verify:
+
+1. Confirm returns Pair created.
+2. `My Pairs` displays it.
+3. Restart/redeploy does not create a duplicate Pair.
+4. The Render log has no `MissingGreenlet` from `repository.py` at `pair.channels.append`.
+
+The new ORM test proves that constructor-supplied `channels=[]` starts loaded; it is not a substitute for a live PostgreSQL/Telegram test.
+
+## Important deployment safety
+
+- Do not delete existing Pair rows or drop tables.
+- Back up Neon/PostgreSQL before applying the existing repost-engine migration overlay; its existing migration removes duplicate loop-origin rows.
+- Deploy one Render service/instance for this polling bot and do not run the same bot token on a second host simultaneously.
+- `/healthz` returning 200 verifies the HTTP health route, not all Telegram/DB functions.
+- Validate the feature branch diff before merging into `main`.

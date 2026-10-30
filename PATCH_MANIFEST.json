@@ -1,0 +1,29 @@
+{
+  "package": "link-loop-bot-full-fix-miniapp-v3",
+  "kind": "integration-overlay",
+  "upstream_repository": "https://github.com/supernaky03-svg/link-loop-bot",
+  "recommended_branch": "fix/link-loop-mini-app",
+  "apply_command": "python apply_link_loop_all_fixes.py",
+  "modified_targets": [
+    "app/db/models.py",
+    "app/bot/handlers/__init__.py",
+    "app/db/repository.py",
+    "app/bot/handlers/pair_add.py",
+    "app/bot/keyboards/reply.py",
+    "app/bot/keyboards/inline.py",
+    "app/bot/handlers/menu.py",
+    "app/main.py",
+    "app/health.py",
+    "app/config.py",
+    "app/bot/locales/en.py",
+    "app/bot/locales/my.py",
+    ".env.example",
+    "app/webapp.py",
+    "app/webapp_auth.py",
+    "app/web/index.html",
+    "tests/test_async_relationship_loading.py",
+    "tests/test_mini_app_auth.py",
+    "tests/test_pair_channels_initialization.py"
+  ],
+  "not_included": ["BOT_TOKEN", "DATABASE_URL", "Render secrets", "GitHub tokens"]
+}

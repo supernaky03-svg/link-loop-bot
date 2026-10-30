@@ -190,6 +190,10 @@ class Repository:
                 movie_rule=movie_rule,
                 is_active=True,
                 is_paused=False,
+                # Initialize the collection before flush. Accessing an unset async
+                # relationship after flush can trigger forbidden implicit IO
+                # (MissingGreenlet) when pair.channels.append(...) is called.
+                channels=[],
             )
             self.session.add(pair)
             await self.session.flush()

@@ -431,9 +431,21 @@ async def add_confirm(callback: CallbackQuery, state: FSMContext, repo: Reposito
         await callback.message.answer(t(language, 'main_menu'), reply_markup=main_menu(language))
     except Exception:
         logger.exception('add pair confirm failed', extra={'user_id': db_user.tg_user_id})
-        await update_flow_message(callback.bot, state, callback.message.chat.id, t(language, 'generic_error'), None)
-        await state.clear()
-        await callback.message.answer(t(language, 'main_menu'), reply_markup=main_menu(language))
+        # Recover the AsyncSession after a failed flush/commit. Keep the FSM in
+        # confirmation state so a transient DB failure can be retried safely.
+        try:
+            await repo.session.rollback()
+        except Exception:
+            logger.exception('add pair confirm rollback failed', extra={'user_id': db_user.tg_user_id})
+        await state.set_state(AddPairStates.confirmation)
+        await update_flow_message(
+            callback.bot,
+            state,
+            callback.message.chat.id,
+            t(language, 'generic_error'),
+            confirm_keyboard(language, 'add'),
+        )
+        return
 
 
 @router.callback_query(AddPairStates.waiting_style, F.data == 'flow:back')

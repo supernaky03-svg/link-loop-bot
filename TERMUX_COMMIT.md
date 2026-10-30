@@ -1,6 +1,6 @@
-# Termux commands — apply, test, commit and push
+# Termux — apply, test, commit and push
 
-This ZIP is a patch overlay, not the full upstream repository. Clone the public repository first. The repository's `link-loop-bot-fixed/` folder contains the repost-engine fixes; this ZIP adds Mini App and its integration scripts.
+This ZIP is an overlay on `supernaky03-svg/link-loop-bot`, not the entire upstream source tree. Use your existing clone when possible.
 
 ## 1. Prepare Termux
 
@@ -10,68 +10,70 @@ pkg install git python unzip gh -y
 termux-setup-storage
 ```
 
-Copy the ZIP to `/sdcard/Download/`.
+Do **not** run `python -m pip install --upgrade pip`; Termux manages its system pip package and blocks that operation.
 
-## 2. Clone and apply
+## 2. Extract into the existing repository
+
+Copy the ZIP to `/sdcard/Download/`, then:
 
 ```bash
-cd ~
-git clone https://github.com/supernaky03-svg/link-loop-bot.git
-cd link-loop-bot
-unzip -o /sdcard/Download/link-loop-bot-full-fix-miniapp-v2.zip -d .
+cd ~/link-loop-bot
+git switch fix/link-loop-mini-app
+git pull --ff-only origin fix/link-loop-mini-app
+unzip -o /sdcard/Download/link-loop-bot-full-fix-miniapp-v3.zip -d .
 python apply_link_loop_all_fixes.py
 ```
 
-## 3. Install and test
+The orchestrator reapplies the project's upstream repost-fix overlay, Mini App integration and this final Pair/keyboard hotfix. Review `git status` immediately afterward.
+
+## 3. Checks
 
 ```bash
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 python -m compileall -q app tests
-pytest -q
+python -m pytest -q tests/test_mini_app_auth.py
+# Requires SQLAlchemy to be installed in Termux; if it is not, run this test
+# in Render/Linux rather than forcing native dependency builds on Android.
+python -m pytest -q tests/test_pair_channels_initialization.py
+python -m pytest -q tests/test_handler_registration_export.py
 ```
 
-A live test still requires your own Telegram token and PostgreSQL database. The ZIP contains no credentials.
-
-## 4. Render setting
-
-Add this environment variable in Render using the actual service URL:
-
-```text
-MINI_APP_URL=https://YOUR-RENDER-SERVICE.onrender.com/app
-```
-
-Keep current `BOT_TOKEN`, `ADMIN_IDS`, `DATABASE_URL`, Render start command `python -m app.main`, and health path `/healthz`.
-
-**Before deploying:** back up Neon/PostgreSQL and review `link-loop-bot-fixed/APPLY_PATCH.md` and `link-loop-bot-fixed/BUG_FIXES.md`. The existing hotfix overlay modifies schema and removes duplicate loop-origin rows.
-
-## 5. Commit on a feature branch
+If SQLAlchemy is available, also run:
 
 ```bash
-git switch -c fix/link-loop-mini-app
-git status --short
-# Confirm .env, tokens, and database URLs are NOT shown.
-git add app tests .env.example
-git commit -m "Fix async repost engine and add Telegram Mini App"
+python -m pytest -q tests/test_async_relationship_loading.py
 ```
 
-## 6. Authenticate and push
+Termux Android may not have compatible wheels for native dependencies such as `pydantic-core` and `asyncpg`. If the full `requirements.txt` install fails, do not treat that as an application-code test failure; run the full test suite on compatible Linux/Render instead.
 
-Use GitHub CLI browser/device login so the token is not placed in shell history:
+## 4. Review and commit
+
+```bash
+git diff --check
+git status --short
+```
+
+Confirm that `.env`, bot tokens, database URLs and GitHub tokens are not staged. Then:
+
+```bash
+git add app tests .env.example apply_link_loop_all_fixes.py apply_mini_app_patch.py apply_pair_and_mini_launch_fix.py README_FULL_FIX.md TERMUX_COMMIT.md DEPLOY_CHECKLIST.md
+git commit -m "Fix Pair async collection and Mini App launch"
+```
+
+## 5. Push
 
 ```bash
 gh auth login --hostname github.com --git-protocol https --web
 gh auth setup-git
-gh auth status
-git push -u origin fix/link-loop-mini-app
+git push origin fix/link-loop-mini-app
 ```
 
-Then open a Pull Request from `fix/link-loop-mini-app` into `main`, review CI and the diff, and merge. Do not force-push.
+If the branch already tracks origin, `git push` is also sufficient. Open/review the PR before merging.
 
-## 7. Post-deployment checks
+## 6. Render
 
-- Open the bot and use **Open Mini App**.
-- Check the signed Telegram identity and user-only pair visibility.
-- Test create, edit style/order, Movie Rule, remove and permission recheck.
-- As admin, test dashboard, ban/unban, limits and status report.
-- Confirm `/healthz` still returns HTTP 200 with `{"ok": true}`.
+- Branch: `fix/link-loop-mini-app`
+- Start command: `python -m app.main`
+- Environment: `MINI_APP_URL=https://link-loop-bot.onrender.com/app`
+- One service instance only for this bot token.
+
+After deploy, test `/start`, Mini App reply-keyboard → inline-button launch, My Pairs, add Pair, and real repost delivery.

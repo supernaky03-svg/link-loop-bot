@@ -71,7 +71,7 @@ def patch_health() -> None:
 def patch_reply_keyboard() -> None:
     (ROOT / "app/bot/keyboards/reply.py").write_text(
         "from __future__ import annotations\n\n"
-        "from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo\n\n"
+        "from aiogram.types import KeyboardButton, ReplyKeyboardMarkup\n\n"
         "from app.bot.services.language_service import b\n"
         "from app.config import get_settings\n\n\n"
         "def main_menu(language: str) -> ReplyKeyboardMarkup:\n"
@@ -81,9 +81,8 @@ def patch_reply_keyboard() -> None:
         "        [KeyboardButton(text=b(language, 'my_pairs')), KeyboardButton(text=b(language, 'language'))],\n"
         "        [KeyboardButton(text=b(language, 'contact_admin')), KeyboardButton(text=b(language, 'help'))],\n"
         "    ]\n"
-        "    url = get_settings().mini_app_url\n"
-        "    if url.startswith('https://'):\n"
-        "        rows.insert(0, [KeyboardButton(text=b(language, 'web_app'), web_app=WebAppInfo(url=url))])\n"
+        "    if get_settings().mini_app_url.strip().startswith('https://'):\n"
+        "        rows.insert(0, [KeyboardButton(text=b(language, 'web_app'))])\n"
         "    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, input_field_placeholder=b(language, 'help'))\n",
         encoding="utf-8",
     )

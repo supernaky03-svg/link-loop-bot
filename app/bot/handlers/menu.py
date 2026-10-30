@@ -4,7 +4,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from app.bot.keyboards.inline import language_keyboard
+from app.bot.keyboards.inline import language_keyboard, mini_app_launch_keyboard
 from app.bot.keyboards.reply import main_menu
 from app.bot.services.flow_message import update_flow_message
 from app.bot.services.language_service import b, t
@@ -19,6 +19,23 @@ router = Router(name='menu')
 
 def _all_button_keys(key: str) -> set[str]:
     return {b('en', key), b('my', key)}
+
+
+@router.message(F.text.in_(_all_button_keys('web_app')))
+async def open_mini_app(message: Message, language: str) -> None:
+    url = get_settings().mini_app_url.strip()
+    if not url.startswith('https://'):
+        await message.answer('Mini App URL is not configured.')
+        return
+    prompt = (
+        'Tap the button below to open the Mini App.'
+        if language == 'en'
+        else 'အောက်ပါ Inline Button ကိုနှိပ်ပြီး Mini App ကိုဖွင့်ပါ။'
+    )
+    await message.answer(
+        prompt,
+        reply_markup=mini_app_launch_keyboard(language, url),
+    )
 
 
 @router.callback_query(F.data == 'flow:cancel')
