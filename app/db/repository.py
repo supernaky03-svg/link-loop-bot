@@ -6,6 +6,7 @@ from typing import Sequence
 
 from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -393,13 +394,29 @@ class Repository:
 
     # ---------- loop protection ----------
     async def mark_processed(self, pair_id: int, chat_id: int, message_id: int) -> bool:
-        self.session.add(ProcessedUpdate(pair_id=pair_id, chat_id=chat_id, message_id=message_id))
-        try:
-            await self.session.commit()
-            return True
-        except IntegrityError:
-            await self.session.rollback()
-            return False
+        """Atomically claim an update without rolling back the surrounding session.
+
+        A normal IntegrityError + session.rollback() expires every loaded ORM object
+        in this AsyncSession, including Pair objects held by channel_posts.py. The
+        next attribute read can then attempt implicit async IO and raise MissingGreenlet.
+        PostgreSQL ON CONFLICT keeps duplicate delivery idempotent without that side effect.
+        """
+        statement = (
+            pg_insert(ProcessedUpdate)
+            .values(pair_id=pair_id, chat_id=chat_id, message_id=message_id)
+            .on_conflict_do_nothing(
+                index_elements=[
+                    ProcessedUpdate.pair_id,
+                    ProcessedUpdate.chat_id,
+                    ProcessedUpdate.message_id,
+                ]
+            )
+            .returning(ProcessedUpdate.id)
+        )
+        result = await self.session.execute(statement)
+        inserted_id = result.scalar_one_or_none()
+        await self.session.commit()
+        return inserted_id is not None
 
     async def create_loop_state(
         self,
@@ -410,36 +427,49 @@ class Repository:
         route_chat_ids: list[int],
         selected_unit_ids: list[int] | None = None,
     ) -> LoopState | None:
-        state = LoopState(
-            loop_id=loop_id,
-            pair_id=pair_id,
-            origin_chat_id=origin_chat_id,
-            origin_message_id=origin_message_id,
-            route_chat_ids=route_chat_ids,
-            selected_unit_ids=selected_unit_ids or [],
-            created_message_ids={},
-            footer_message_ids={},
-            current_index=0,
-            status='running',
+        """Claim a loop origin atomically without session-wide rollback on duplicates."""
+        statement = (
+            pg_insert(LoopState)
+            .values(
+                loop_id=loop_id,
+                pair_id=pair_id,
+                origin_chat_id=origin_chat_id,
+                origin_message_id=origin_message_id,
+                route_chat_ids=route_chat_ids,
+                selected_unit_ids=selected_unit_ids or [],
+                created_message_ids={},
+                footer_message_ids={},
+                current_index=0,
+                status='running',
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    LoopState.pair_id,
+                    LoopState.origin_chat_id,
+                    LoopState.origin_message_id,
+                ]
+            )
+            .returning(LoopState.id)
         )
-        self.session.add(state)
-        try:
-            await self.session.commit()
-            return state
-        except IntegrityError:
-            await self.session.rollback()
-            existing = await self.session.execute(
-                select(LoopState).where(
-                    LoopState.pair_id == pair_id,
-                    LoopState.origin_chat_id == origin_chat_id,
-                    LoopState.origin_message_id == origin_message_id,
-                )
+        result = await self.session.execute(statement)
+        inserted_id = result.scalar_one_or_none()
+        await self.session.commit()
+
+        if inserted_id is not None:
+            return await self.get_loop_state(loop_id)
+
+        existing_result = await self.session.execute(
+            select(LoopState).where(
+                LoopState.pair_id == pair_id,
+                LoopState.origin_chat_id == origin_chat_id,
+                LoopState.origin_message_id == origin_message_id,
             )
-            logger.info(
-                'loop already claimed for origin',
-                extra={'pair_id': pair_id, 'chat_id': origin_chat_id, 'message_id': origin_message_id},
-            )
-            return existing.scalar_one_or_none()
+        )
+        logger.info(
+            'loop already claimed for origin',
+            extra={'pair_id': pair_id, 'chat_id': origin_chat_id, 'message_id': origin_message_id},
+        )
+        return existing_result.scalar_one_or_none()
 
     async def get_loop_event_by_created_message(self, chat_id: int, message_id: int) -> LoopEvent | None:
         result = await self.session.execute(
@@ -487,8 +517,10 @@ class Repository:
         to_message_id: int,
         status: str = 'sent',
     ) -> None:
-        self.session.add(
-            LoopEvent(
+        """Persist a bot-created message idempotently without expiring loaded objects."""
+        statement = (
+            pg_insert(LoopEvent)
+            .values(
                 loop_id=loop_id,
                 pair_id=pair_id,
                 origin_chat_id=origin_chat_id,
@@ -500,15 +532,12 @@ class Repository:
                 created_by_bot=True,
                 status=status,
             )
+            # Both event uniqueness guards represent duplicate delivery, so ignore
+            # either conflict. Do not IntegrityError/rollback the shared AsyncSession.
+            .on_conflict_do_nothing()
         )
-        try:
-            await self.session.commit()
-        except IntegrityError:
-            await self.session.rollback()
-            # Duplicate exact destination message is idempotent; do not hide other failures.
-            existing = await self.get_loop_event_by_created_message(to_chat_id, to_message_id)
-            if not existing:
-                raise
+        await self.session.execute(statement)
+        await self.session.commit()
 
     async def update_loop_delivery(
         self,
