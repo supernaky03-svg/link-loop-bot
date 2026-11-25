@@ -1,0 +1,20 @@
+{
+  "repository": "supernaky03-svg/link-loop-bot",
+  "target_branch": "main",
+  "base_commit": "6b0dacee9e5817c85cd152a7e5811c489d4bd491",
+  "package": "link-loop-pair-channel-management-overlay-main-v2",
+  "type": "overlay_patch",
+  "features": [
+    "Bot menu flow to add or remove one channel inside a selected pair",
+    "Mini App per-pair single-channel add form and per-channel remove controls",
+    "Shared Bot API domain service for both interfaces",
+    "Telegram admin/Post Messages permission check on add",
+    "Per-user channel limit and duplicate prevention",
+    "Soft removal and reactivation without duplicate PairChannel rows",
+    "Automatic pause below two active channels and safe auto-resume",
+    "Ownership-scoped authenticated Mini App endpoints",
+    "Unit tests for add/remove and pause behavior"
+  ],
+  "database_migration_required": false,
+  "production_tested": false
+}

@@ -266,7 +266,11 @@ class Repository:
                 if channel.chat_id == chat_id:
                     channel.bot_admin_ok = True
                     channel.last_admin_check_at = datetime.now(timezone.utc)
-            if all(ch.bot_admin_ok for ch in pair.channels if ch.is_active):
+            active_channels = [ch for ch in pair.channels if ch.is_active]
+            if len(active_channels) < 2:
+                pair.is_paused = True
+                pair.paused_reason = "insufficient_channels"
+            elif all(ch.bot_admin_ok for ch in active_channels):
                 pair.is_paused = False
                 pair.paused_reason = None
         await self.session.commit()

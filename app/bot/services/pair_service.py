@@ -24,7 +24,7 @@ def pair_details(pair: Pair) -> str:
         f'Status: {status}',
         'Channels:',
     ]
-    for ch in sorted(pair.channels, key=lambda c: c.order_no):
+    for ch in sorted((item for item in pair.channels if item.is_active), key=lambda c: c.order_no):
         lines.append(f'{ch.order_no}. {ch.title} ({ch.chat_id})')
     return '\n'.join(lines)
 

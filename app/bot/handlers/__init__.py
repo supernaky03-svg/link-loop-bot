@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import Dispatcher
 
-from . import admin, channel_posts, menu, pair_add, pair_edit, pair_remove, permissions, start
+from . import admin, channel_management, channel_posts, menu, pair_add, pair_edit, pair_remove, permissions, start
 
 
 def register_handlers(dp: Dispatcher) -> None:
@@ -12,6 +12,7 @@ def register_handlers(dp: Dispatcher) -> None:
     # Main-menu buttons (including Mini App) must run before state-wide
     # text-input handlers, so they are not consumed as channel input.
     dp.include_router(menu.router)
+    dp.include_router(channel_management.router)
     dp.include_router(pair_add.router)
     dp.include_router(pair_remove.router)
     dp.include_router(pair_edit.router)

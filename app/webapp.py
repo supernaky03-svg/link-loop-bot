@@ -15,6 +15,7 @@ from app.db.models import Pair, Setting, User
 from app.db.repository import Repository
 from app.db.session import AsyncSessionLocal
 from app.webapp_auth import InitDataError, validate_telegram_init_data
+from app.web_channel_management import api_add_pair_channel, api_remove_pair_channel
 
 logger = logging.getLogger(__name__)
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -260,18 +261,28 @@ async def api_recheck_pair(request: web.Request) -> web.Response:
     pair = await repo.get_pair_by_no(user.id, int(request.match_info["pair_no"]))
     if not pair:
         return json_error("Pair not found.", 404)
+    active_channels = [channel for channel in pair.channels if channel.is_active]
     failures = []
-    for channel in pair.channels:
+    for channel in active_channels:
         checked = await resolve_and_check_channel(request.app["bot"], str(channel.chat_id), channel.order_no)
         channel.bot_admin_ok = bool(checked.ok)
         channel.last_admin_check_at = datetime.now(timezone.utc)
         if not checked.ok:
             failures.append(channel.title)
-    pair.is_paused = bool(failures)
-    pair.paused_reason = "bot_admin_missing" if failures else None
+    if len(active_channels) < 2:
+        pair.is_paused = True
+        pair.paused_reason = "insufficient_channels"
+    else:
+        pair.is_paused = bool(failures)
+        pair.paused_reason = "bot_admin_missing" if failures else None
     await request["session"].commit()
     refreshed = await repo.get_pair_by_no(user.id, pair.pair_no)
-    message = "Permission is still missing: " + ", ".join(failures) if failures else "All channel permissions are OK. Pair resumed."
+    if len(active_channels) < 2:
+        message = "Pair remains paused: at least two active channels are required."
+    elif failures:
+        message = "Permission is still missing: " + ", ".join(failures)
+    else:
+        message = "All channel permissions are OK. Pair resumed."
     return web.json_response({"ok": True, "pair": pair_payload(refreshed), "message": message})
 
 
@@ -442,6 +453,8 @@ def create_web_app(settings: Settings, bot) -> web.Application:
     app.router.add_get("/app", mini_app_index)
     app.router.add_get("/api/bootstrap", api_bootstrap)
     app.router.add_post("/api/pairs", api_create_pair)
+    app.router.add_post(r"/api/pairs/{pair_no:\d+}/channels", api_add_pair_channel)
+    app.router.add_delete(r"/api/pairs/{pair_no:\d+}/channels/{chat_id:-?\d+}", api_remove_pair_channel)
     app.router.add_put(r"/api/pairs/{pair_no:\d+}", api_update_pair)
     app.router.add_delete(r"/api/pairs/{pair_no:\d+}", api_delete_pair)
     app.router.add_post(r"/api/pairs/{pair_no:\d+}/recheck", api_recheck_pair)

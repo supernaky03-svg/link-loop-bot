@@ -10,6 +10,7 @@ def main_menu(language: str) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=b(language, 'add_pair')), KeyboardButton(text=b(language, 'remove_pair'))],
         [KeyboardButton(text=b(language, 'edit_style')), KeyboardButton(text=b(language, 'edit_movie'))],
+        [KeyboardButton(text=b(language, 'manage_channels'))],
         [KeyboardButton(text=b(language, 'my_pairs')), KeyboardButton(text=b(language, 'language'))],
         [KeyboardButton(text=b(language, 'contact_admin')), KeyboardButton(text=b(language, 'help'))],
     ]
